@@ -8,7 +8,7 @@ PRODUCT_RELEASE_NAME := gtel3g
 $(call inherit-product, vendor/lineage/config/common_full_phone.mk)
 
 # Inherit device configuration
-$(call inherit-product, $(LOCAL_PATH)/gtel3g.mk)
+$(call inherit-product, device/samsung/gtel3g/gtel3g.mk)
 
 ## Device identifier. This must come after all inclusions
 PRODUCT_DEVICE := gtel3g

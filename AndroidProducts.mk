@@ -18,4 +18,4 @@
 #
 
 PRODUCT_MAKEFILES := \
-	$(LOCAL_DIR)/gtel3g.mk
+	$(LOCAL_DIR)/lineage_gtel3g.mk
