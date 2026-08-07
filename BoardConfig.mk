@@ -99,6 +99,7 @@ TARGET_OTA_ASSERT_DEVICE := SM-T561,SM-T560,gtel3g,gtelwifi,gtel3gxx,gtelwifixx
 # Sensors
 TARGET_USES_SENSORS_WRAPPER := true
 
-# Camera
+# Shims
 TARGET_LD_SHIM_LIBS += \
-	/system/vendor/lib/hw/camera.sc8830.so|libmemoryheapion.so
+	/system/vendor/lib/hw/camera.sc8830.so|libmemoryheapion.so \
+ 	/system/vendor/lib/egl/libGLES_mali.so|libion_shim.so
