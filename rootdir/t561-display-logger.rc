@@ -1,0 +1,15 @@
+# Temporary early-boot diagnostic service for Samsung SM-T561 / gtel3g.
+# Remove it after the display issue is fixed.
+
+service t561_display_logger /system/bin/sh /system/bin/collect_t561_display_logs_early.sh 300 5
+    class core
+    user root
+    group root system shell log readproc graphics
+    disabled
+    oneshot
+    seclabel u:r:init:s0
+
+on post-fs-data
+    mkdir /cache/t561-display-logs 0777 root root
+    start t561_display_logger
+
