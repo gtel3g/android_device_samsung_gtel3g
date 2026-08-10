@@ -1,0 +1,160 @@
+From 9b17cf432d69c3a8740d36f04577d86651849ae9 Mon Sep 17 00:00:00 2001
+From: Ma3a_XaTa <v.radulevich@gmail.com>
+Date: Mon, 10 Aug 2026 02:57:55 +0300
+Subject: [PATCH] graphics: support legacy SPRD gralloc mapper
+
+Change-Id: Ib466495dcbacbd4d2f3625d562dc35071231cbf4
+---
+ .../mapper-passthrough/2.0/Gralloc0Hal.h      | 88 ++++++++++++++++++-
+ .../mapper-passthrough/2.0/GrallocLoader.h    | 13 +--
+ 2 files changed, 90 insertions(+), 11 deletions(-)
+
+diff --git a/graphics/mapper/2.0/utils/passthrough/include/mapper-passthrough/2.0/Gralloc0Hal.h b/graphics/mapper/2.0/utils/passthrough/include/mapper-passthrough/2.0/Gralloc0Hal.h
+index 7369ac75..1c9b0675 100644
+--- a/graphics/mapper/2.0/utils/passthrough/include/mapper-passthrough/2.0/Gralloc0Hal.h
++++ b/graphics/mapper/2.0/utils/passthrough/include/mapper-passthrough/2.0/Gralloc0Hal.h
+@@ -20,6 +20,8 @@
+ #endif
+ 
+ #include <inttypes.h>
++#include <cstring>
++#include <unistd.h>
+ 
+ #include <hardware/gralloc.h>
+ #include <log/log.h>
+@@ -75,17 +77,101 @@ class Gralloc0HalImpl : public Hal {
+ 
+     Error importBuffer(const native_handle_t* rawHandle,
+                        native_handle_t** outBufferHandle) override {
+-        native_handle_t* bufferHandle = native_handle_clone(rawHandle);
++        /*
++         * Legacy SPRD diagnostic.
++         *
++         * Keep the on-wire native_handle ABI unchanged, but reserve extra
++         * local memory behind the cloned handle. Old SPRD gralloc may write
++         * process-local private_handle_t fields past the serialized payload.
++         */
++        constexpr int kSprdPadInts = 32;
++        constexpr int kSprdPadPattern = 0x6a6a6a6a;
++
++        const int rawFds = rawHandle->numFds;
++        const int rawInts = rawHandle->numInts;
++
++        native_handle_t* bufferHandle =
++                native_handle_create(rawFds, rawInts + kSprdPadInts);
++
+         if (!bufferHandle) {
+             return Error::NO_RESOURCES;
+         }
+ 
++        for (int i = 0; i < rawFds; ++i) {
++            bufferHandle->data[i] = -1;
++        }
++
++        for (int i = 0; i < rawFds; ++i) {
++            const int fd = dup(rawHandle->data[i]);
++
++            if (fd < 0) {
++                for (int j = 0; j < i; ++j) {
++                    close(bufferHandle->data[j]);
++                }
++
++                native_handle_delete(bufferHandle);
++                return Error::NO_RESOURCES;
++            }
++
++            bufferHandle->data[i] = fd;
++        }
++
++        std::memcpy(
++                bufferHandle->data + rawFds,
++                rawHandle->data + rawFds,
++                static_cast<size_t>(rawInts) * sizeof(int));
++
++        int* const sprdPad =
++                bufferHandle->data + rawFds + rawInts;
++
++        for (int i = 0; i < kSprdPadInts; ++i) {
++            sprdPad[i] = kSprdPadPattern;
++        }
++
++        /*
++         * Critical: advertise the original legacy transport ABI.
++         * The extra storage above is local only and must never be transported.
++         */
++        bufferHandle->numInts = rawInts;
++
++        ALOGW("Legacy SPRD padded clone: raw=%p clone=%p fds=%d ints=%d "
++              "transport=%zu allocated=%zu",
++              rawHandle,
++              bufferHandle,
++              rawFds,
++              rawInts,
++              sizeof(native_handle_t) +
++                      sizeof(int) * static_cast<size_t>(rawFds + rawInts),
++              sizeof(native_handle_t) +
++                      sizeof(int) *
++                              static_cast<size_t>(
++                                      rawFds + rawInts + kSprdPadInts));
++
+         if (mModule->registerBuffer(mModule, bufferHandle)) {
+             native_handle_close(bufferHandle);
+             native_handle_delete(bufferHandle);
+             return Error::BAD_BUFFER;
+         }
+ 
++        bool sprdOverflow = false;
++
++        for (int i = 0; i < kSprdPadInts; ++i) {
++            if (sprdPad[i] != kSprdPadPattern) {
++                ALOGE("Legacy SPRD HANDLE OVERFLOW: pad[%d] "
++                      "expected=0x%08x got=0x%08x",
++                      i,
++                      kSprdPadPattern,
++                      sprdPad[i]);
++
++                sprdOverflow = true;
++                break;
++            }
++        }
++
++        if (!sprdOverflow) {
++            ALOGW("Legacy SPRD handle padding intact after registerBuffer");
++        }
++
+         *outBufferHandle = bufferHandle;
+ 
+         return Error::NONE;
+diff --git a/graphics/mapper/2.0/utils/passthrough/include/mapper-passthrough/2.0/GrallocLoader.h b/graphics/mapper/2.0/utils/passthrough/include/mapper-passthrough/2.0/GrallocLoader.h
+index e8b1b4b8..c7abb4dd 100644
+--- a/graphics/mapper/2.0/utils/passthrough/include/mapper-passthrough/2.0/GrallocLoader.h
++++ b/graphics/mapper/2.0/utils/passthrough/include/mapper-passthrough/2.0/GrallocLoader.h
+@@ -57,22 +57,15 @@ class GrallocImportedBufferPool {
+     }
+ 
+     void* add(native_handle_t* bufferHandle) {
+-        std::lock_guard<std::mutex> lock(mMutex);
+-        return mBufferHandles.insert(bufferHandle).second ? bufferHandle : nullptr;
++        return static_cast<void*>(bufferHandle);
+     }
+ 
+     native_handle_t* remove(void* buffer) {
+-        auto bufferHandle = static_cast<native_handle_t*>(buffer);
+-
+-        std::lock_guard<std::mutex> lock(mMutex);
+-        return mBufferHandles.erase(bufferHandle) == 1 ? bufferHandle : nullptr;
++        return static_cast<native_handle_t*>(buffer);
+     }
+ 
+     const native_handle_t* get(void* buffer) {
+-        auto bufferHandle = static_cast<const native_handle_t*>(buffer);
+-
+-        std::lock_guard<std::mutex> lock(mMutex);
+-        return mBufferHandles.count(bufferHandle) == 1 ? bufferHandle : nullptr;
++        return static_cast<const native_handle_t*>(buffer);
+     }
+ 
+    private:
+-- 
+2.43.0
+

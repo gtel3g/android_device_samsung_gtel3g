@@ -1,0 +1,264 @@
+From 2be85121da5cfb4d83b92e042ad864c9699e4b0e Mon Sep 17 00:00:00 2001
+From: Ma3a_XaTa <v.radulevich@gmail.com>
+Date: Mon, 10 Aug 2026 02:57:21 +0300
+Subject: [PATCH] libgui: support legacy SPRD native window ABI
+
+Change-Id: I8eed67ec205b2e74e1f274b1459a83bea56a3ce0
+---
+ libs/gui/Surface.cpp               |  12 +++-
+ libs/ui/Gralloc2.cpp               | 105 +++++++++++++++--------------
+ libs/ui/GraphicBufferAllocator.cpp |  38 ++++++++++-
+ 3 files changed, 101 insertions(+), 54 deletions(-)
+
+diff --git a/libs/gui/Surface.cpp b/libs/gui/Surface.cpp
+index 2de14c884..72308e7aa 100644
+--- a/libs/gui/Surface.cpp
++++ b/libs/gui/Surface.cpp
+@@ -383,7 +383,11 @@ int Surface::hook_setSwapInterval(ANativeWindow* window, int interval) {
+ int Surface::hook_dequeueBuffer(ANativeWindow* window,
+         ANativeWindowBuffer** buffer, int* fenceFd) {
+     Surface* c = getSelf(window);
+-    return c->dequeueBuffer(buffer, fenceFd);
++
++    int ret = c->dequeueBuffer(buffer, fenceFd);
++
++
++    return ret;
+ }
+ 
+ int Surface::hook_cancelBuffer(ANativeWindow* window,
+@@ -395,6 +399,8 @@ int Surface::hook_cancelBuffer(ANativeWindow* window,
+ int Surface::hook_queueBuffer(ANativeWindow* window,
+         ANativeWindowBuffer* buffer, int fenceFd) {
+     Surface* c = getSelf(window);
++
++
+     return c->queueBuffer(buffer, fenceFd);
+ }
+ 
+@@ -416,6 +422,8 @@ int Surface::hook_dequeueBuffer_DEPRECATED(ANativeWindow* window,
+         return waitResult;
+     }
+     *buffer = buf;
++
++
+     return result;
+ }
+ 
+@@ -434,6 +442,8 @@ int Surface::hook_lockBuffer_DEPRECATED(ANativeWindow* window,
+ int Surface::hook_queueBuffer_DEPRECATED(ANativeWindow* window,
+         ANativeWindowBuffer* buffer) {
+     Surface* c = getSelf(window);
++
++
+     return c->queueBuffer(buffer, -1);
+ }
+ 
+diff --git a/libs/ui/Gralloc2.cpp b/libs/ui/Gralloc2.cpp
+index 918251f9d..19cca0c60 100644
+--- a/libs/ui/Gralloc2.cpp
++++ b/libs/ui/Gralloc2.cpp
+@@ -56,17 +56,17 @@ uint64_t getValid10UsageBits() {
+     return valid10UsageBits;
+ }
+ 
++#if 0
++// Disabled for legacy SPRD Mapper 2.0 experiment.
+ uint64_t getValid11UsageBits() {
+-    static const uint64_t valid11UsageBits = []() -> uint64_t {
+-        using hardware::graphics::common::V1_1::BufferUsage;
+-        uint64_t bits = 0;
+-        for (const auto bit : hardware::hidl_enum_iterator<BufferUsage>()) {
+-            bits = bits | bit;
+-        }
+-        return bits;
+-    }();
+-    return valid11UsageBits;
++    using hardware::graphics::common::V1_1::BufferUsage;
++    uint64_t bits = 0;
++    for (const auto bit : hardware::hidl_enum_iterator<BufferUsage>()) {
++        bits = bits | bit;
++    }
++    return bits;
+ }
++#endif
+ 
+ }  // anonymous namespace
+ 
+@@ -84,15 +84,26 @@ Mapper::Mapper()
+         LOG_ALWAYS_FATAL("gralloc-mapper must be in passthrough mode");
+     }
+ 
+-    // IMapper 2.1 is optional
+-    mMapperV2_1 = IMapper::castFrom(mMapper);
++    /*
++     * Legacy SPRD gralloc0 device.
++     *
++     * This device only provides mapper@2.0 passthrough. Keep the
++     * optional mapper@2.1 pointer unused. On this legacy stack it
++     * becomes corrupted later during boot, so never dereference it.
++     */
++    mMapperV2_1 = nullptr;
++
++    ALOGW("Legacy SPRD: forcing graphics mapper 2.0, this=%p mapper=%p",
++          this, mMapper.get());
+ }
+ 
+ Gralloc2::Error Mapper::validateBufferDescriptorInfo(
+         const IMapper::BufferDescriptorInfo& descriptorInfo) const {
+     uint64_t validUsageBits = getValid10UsageBits();
+-    if (mMapperV2_1 != nullptr) {
+-        validUsageBits = validUsageBits | getValid11UsageBits();
++
++    if (mMapperV2_1.get() != nullptr) {
++        ALOGE("Legacy SPRD: mapper2.1 guard corrupted: this=%p mapper=%p guard=%p",
++              this, mMapper.get(), mMapperV2_1.get());
+     }
+ 
+     if (descriptorInfo.usage & ~validUsageBits) {
+@@ -122,20 +133,23 @@ Error Mapper::createDescriptor(
+                        *outDescriptor = tmpDescriptor;
+                    };
+ 
+-    hardware::Return<void> ret;
+-    if (mMapperV2_1 != nullptr) {
+-        ret = mMapperV2_1->createDescriptor_2_1(descriptorInfo, hidl_cb);
+-    } else {
+-        const hardware::graphics::mapper::V2_0::IMapper::BufferDescriptorInfo info = {
+-            descriptorInfo.width,
+-            descriptorInfo.height,
+-            descriptorInfo.layerCount,
+-            static_cast<hardware::graphics::common::V1_0::PixelFormat>(descriptorInfo.format),
+-            descriptorInfo.usage,
+-        };
+-        ret = mMapper->createDescriptor(info, hidl_cb);
++    if (mMapperV2_1.get() != nullptr) {
++        ALOGE("Legacy SPRD: mapper2.1 guard corrupted in createDescriptor: "
++              "this=%p mapper=%p guard=%p",
++              this, mMapper.get(), mMapperV2_1.get());
+     }
+ 
++    const hardware::graphics::mapper::V2_0::IMapper::BufferDescriptorInfo info = {
++        descriptorInfo.width,
++        descriptorInfo.height,
++        descriptorInfo.layerCount,
++        static_cast<hardware::graphics::common::V1_0::PixelFormat>(descriptorInfo.format),
++        descriptorInfo.usage,
++    };
++
++    hardware::Return<void> ret =
++            mMapper->createDescriptor(info, hidl_cb);
++
+     return (ret.isOk()) ? error : kTransactionError;
+ }
+ 
+@@ -171,14 +185,18 @@ Error Mapper::validateBufferSize(buffer_handle_t bufferHandle,
+         const IMapper::BufferDescriptorInfo& descriptorInfo,
+         uint32_t stride) const
+ {
+-    if (mMapperV2_1 == nullptr) {
+-        return Error::NONE;
++    (void)bufferHandle;
++    (void)descriptorInfo;
++    (void)stride;
++
++    if (mMapperV2_1.get() != nullptr) {
++        ALOGE("Legacy SPRD: mapper2.1 guard corrupted in validateBufferSize: "
++              "this=%p mapper=%p guard=%p",
++              this, mMapper.get(), mMapperV2_1.get());
+     }
+ 
+-    auto buffer = const_cast<native_handle_t*>(bufferHandle);
+-    auto ret = mMapperV2_1->validateBufferSize(buffer, descriptorInfo, stride);
+-
+-    return (ret.isOk()) ? static_cast<Error>(ret) : kTransactionError;
++    // Mapper 2.0 has no validateBufferSize() operation.
++    return Error::NONE;
+ }
+ 
+ void Mapper::getTransportSize(buffer_handle_t bufferHandle,
+@@ -187,28 +205,11 @@ void Mapper::getTransportSize(buffer_handle_t bufferHandle,
+     *outNumFds = uint32_t(bufferHandle->numFds);
+     *outNumInts = uint32_t(bufferHandle->numInts);
+ 
+-    if (mMapperV2_1 == nullptr) {
+-        return;
++    if (mMapperV2_1.get() != nullptr) {
++        ALOGE("Legacy SPRD: mapper2.1 guard corrupted in getTransportSize: "
++              "this=%p mapper=%p guard=%p",
++              this, mMapper.get(), mMapperV2_1.get());
+     }
+-
+-    Error error;
+-    auto buffer = const_cast<native_handle_t*>(bufferHandle);
+-    auto ret = mMapperV2_1->getTransportSize(buffer,
+-            [&](const auto& tmpError, const auto& tmpNumFds, const auto& tmpNumInts) {
+-                error = tmpError;
+-                if (error != Error::NONE) {
+-                    return;
+-                }
+-
+-                *outNumFds = tmpNumFds;
+-                *outNumInts = tmpNumInts;
+-            });
+-
+-    if (!ret.isOk()) {
+-        error = kTransactionError;
+-    }
+-    ALOGE_IF(error != Error::NONE, "getTransportSize(%p) failed with %d",
+-            buffer, error);
+ }
+ 
+ Error Mapper::lock(buffer_handle_t bufferHandle, uint64_t usage,
+diff --git a/libs/ui/GraphicBufferAllocator.cpp b/libs/ui/GraphicBufferAllocator.cpp
+index eaba1ed1a..44731a3a9 100644
+--- a/libs/ui/GraphicBufferAllocator.cpp
++++ b/libs/ui/GraphicBufferAllocator.cpp
+@@ -115,7 +115,43 @@ status_t GraphicBufferAllocator::allocate(uint32_t width, uint32_t height,
+     info.format = static_cast<Gralloc2::PixelFormat>(format);
+     info.usage = usage;
+ 
+-    Gralloc2::Error error = mAllocator->allocate(info, stride, handle);
++    /*
++     * Legacy SPRD diagnostic:
++     *
++     * Do not use the persistent Gralloc2::Allocator here.
++     * Its stored Mapper reference becomes invalid after SurfaceFlinger
++     * initialization on this legacy graphics stack.
++     *
++     * Re-create it from GraphicBufferMapper's known-good Mapper for
++     * every allocation. This is intentionally diagnostic for now.
++     */
++    /*
++     * Legacy SPRD diagnostic.
++     *
++     * GraphicBufferAllocator::mMapper gets overwritten after the
++     * first framebuffer allocation. Do not dereference that member.
++     * Fetch GraphicBufferMapper singleton directly for every request.
++     */
++
++    const uintptr_t rawMember0 =
++            *reinterpret_cast<const uintptr_t*>(this);
++
++    GraphicBufferMapper& sprdGBM =
++            GraphicBufferMapper::getInstance();
++
++    const Gralloc2::Mapper& sprdMapper =
++            sprdGBM.getGrallocMapper();
++
++    ALOGW("Legacy SPRD GBA2: this=%p rawMember0=0x%08lx freshGBM=%p mapper=%p",
++          this,
++          static_cast<unsigned long>(rawMember0),
++          &sprdGBM,
++          &sprdMapper);
++
++    Gralloc2::Allocator sprdAllocator(sprdMapper);
++
++    Gralloc2::Error error =
++            sprdAllocator.allocate(info, stride, handle);
+     if (error == Gralloc2::Error::NONE) {
+         Mutex::Autolock _l(sLock);
+         KeyedVector<buffer_handle_t, alloc_rec_t>& list(sAllocList);
+-- 
+2.43.0
+

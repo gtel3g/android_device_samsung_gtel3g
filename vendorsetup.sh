@@ -22,3 +22,11 @@
 for i in eng user userdebug; do
 add_lunch_combo lineage_gtel3g-${i};
 done
+
+#!/bin/bash
+
+DEVICE_PATH="${BASH_SOURCE[0]%/*}"
+
+if [ -x "$DEVICE_PATH/apply-patches.sh" ]; then
+    "$DEVICE_PATH/apply-patches.sh"
+fi
