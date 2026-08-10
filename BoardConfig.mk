@@ -49,6 +49,7 @@ WIFI_DRIVER_FW_PATH_AP := "/vendor/etc/wifi/bcmdhd_apsta.bin"
 WIFI_DRIVER_NVRAM_PATH_PARAM := "/sys/module/dhd/parameters/nvram_path"
 WIFI_DRIVER_NVRAM_PATH := "/vendor/etc/wifi/nvram_net.txt"
 WIFI_BAND := 802_11_ABG
+TARGET_NEEDS_NETD_DIRECT_CONNECT_RULE := true
 BOARD_HAVE_SAMSUNG_WIFI := true
 
 # Camera
