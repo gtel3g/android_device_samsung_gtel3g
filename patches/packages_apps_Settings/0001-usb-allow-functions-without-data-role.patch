@@ -1,0 +1,15 @@
+diff --git a/src/com/android/settings/connecteddevice/usb/UsbDetailsFunctionsController.java b/src/com/android/settings/connecteddevice/usb/UsbDetailsFunctionsController.java
+index c5fec421af..cdeae55ed2 100644
+--- a/src/com/android/settings/connecteddevice/usb/UsbDetailsFunctionsController.java
++++ b/src/com/android/settings/connecteddevice/usb/UsbDetailsFunctionsController.java
+@@ -87,7 +87,9 @@ public class UsbDetailsFunctionsController extends UsbDetailsController
+ 
+     @Override
+     protected void refresh(boolean connected, long functions, int powerRole, int dataRole) {
+-        if (!connected || dataRole != UsbPort.DATA_ROLE_DEVICE) {
++        if (!connected
++                || (dataRole != UsbPort.DATA_ROLE_DEVICE
++                && dataRole != UsbPort.DATA_ROLE_NONE)) {
+             mProfilesContainer.setEnabled(false);
+         } else {
+             // Functions are only available in device mode
