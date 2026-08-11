@@ -33,8 +33,11 @@ apply_series() {
     done
 }
 
+apply_series bionic bionic
+apply_series frameworks/base frameworks_base
 apply_series frameworks/native frameworks_native
 apply_series hardware/interfaces hardware_interfaces
-
+apply_series packages/apps/Settings packages_apps_Settings
+apply_series packages/providers/MediaProvider packages_providers_MediaProvider
 
 echo "All gtel3g source patches applied."

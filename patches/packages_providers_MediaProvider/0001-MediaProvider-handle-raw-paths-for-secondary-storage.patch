@@ -1,0 +1,40 @@
+From c37dea9553c5f72d4720b05ff183ee1c8b991aaf Mon Sep 17 00:00:00 2001
+From: Ma3a_XaTa <v.radulevich@gmail.com>
+Date: Tue, 11 Aug 2026 15:03:47 +0300
+Subject: [PATCH] MediaProvider: handle raw paths for secondary storage
+
+Change-Id: Iaa458d65231232e83103b0b902085447a996f484
+---
+ src/com/android/providers/media/MediaProvider.java | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/src/com/android/providers/media/MediaProvider.java b/src/com/android/providers/media/MediaProvider.java
+index 739cfb7..dce1030 100644
+--- a/src/com/android/providers/media/MediaProvider.java
++++ b/src/com/android/providers/media/MediaProvider.java
+@@ -4240,9 +4240,21 @@ public class MediaProvider extends ContentProvider {
+ 
+     private boolean isSecondaryExternalPath(String path) {
+         for (int i = 1; i < mExternalStoragePaths.length; i++) {
+-            if (path.startsWith(mExternalStoragePaths[i])) {
++            final String externalPath = mExternalStoragePaths[i];
++
++            if (path.startsWith(externalPath)) {
+                 return true;
+             }
++
++            // Legacy MTP/MediaScanner paths for removable public storage may
++            // use the raw vold path instead of the app-visible path.
++            if (externalPath.startsWith("/storage/")) {
++                final String internalPath =
++                        externalPath.replaceFirst("^/storage/", "/mnt/media_rw/");
++                if (path.startsWith(internalPath)) {
++                    return true;
++                }
++            }
+         }
+         return false;
+     }
+-- 
+2.43.0
+
