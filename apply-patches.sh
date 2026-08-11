@@ -23,7 +23,7 @@ apply_series() {
             echo "    already applied"
         elif git -C "$TOP/$project" apply \
             --check "$patch" >/dev/null 2>&1; then
-            git -C "$TOP/$project" am --3way "$patch"
+            git -C "$TOP/$project" apply "$patch"
         else
             echo "ERROR: patch does not apply cleanly"
             echo "Project: $project"
