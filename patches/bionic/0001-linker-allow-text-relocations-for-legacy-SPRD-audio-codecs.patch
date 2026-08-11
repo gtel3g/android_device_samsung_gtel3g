@@ -1,0 +1,39 @@
+From 9aaff2fdc51bb1972e16c146c9a557e08a3c3710 Mon Sep 17 00:00:00 2001
+From: Ma3a_XaTa <v.radulevich@gmail.com>
+Date: Tue, 11 Aug 2026 14:50:49 +0300
+Subject: [PATCH] linker: allow text relocations for legacy SPRD audio codecs
+
+Change-Id: Id9a12eca300e17b6e2cd4973cc924b3628b99156
+---
+ linker/linker.cpp | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/linker/linker.cpp b/linker/linker.cpp
+index 951351c32..032094e59 100644
+--- a/linker/linker.cpp
++++ b/linker/linker.cpp
+@@ -3619,9 +3619,19 @@ bool soinfo::link_image(const soinfo_list_t& global_group, const soinfo_list_t&
+ 
+ #if !defined(__LP64__)
+   if (has_text_relocations) {
+-    // Fail if app is targeting M or above.
++    // Fail if app is targeting M or above, except for legacy SPRD audio codecs
++    // shipped by old Samsung/Spreadtrum devices.
+     int app_target_api_level = get_application_target_sdk_version();
+-    if (app_target_api_level >= __ANDROID_API_M__) {
++    const char* realpath = get_realpath();
++
++    const bool is_legacy_sprd_audio_codec =
++        strcmp(realpath, "/vendor/lib/libomx_aacdec_sprd.so") == 0 ||
++        strcmp(realpath, "/system/vendor/lib/libomx_aacdec_sprd.so") == 0 ||
++        strcmp(realpath, "/vendor/lib/libomx_mp3dec_sprd.so") == 0 ||
++        strcmp(realpath, "/system/vendor/lib/libomx_mp3dec_sprd.so") == 0;
++
++    if (app_target_api_level >= __ANDROID_API_M__ &&
++        !is_legacy_sprd_audio_codec) {
+       DL_ERR_AND_LOG("\"%s\" has text relocations (https://android.googlesource.com/platform/"
+                      "bionic/+/master/android-changes-for-ndk-developers.md#Text-Relocations-"
+                      "Enforced-for-API-level-23)", get_realpath());
+-- 
+2.43.0
+
