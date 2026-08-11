@@ -1,0 +1,26 @@
+From c00a4f9677f30a24dc77b0fc7039b2f8906cb1d2 Mon Sep 17 00:00:00 2001
+From: Ma3a_XaTa <v.radulevich@gmail.com>
+Date: Tue, 11 Aug 2026 03:12:59 +0300
+Subject: [PATCH] AudioService: alias system volume to media for gtel3g
+
+Change-Id: I082b88a3e73927d232655669a50fe5c5b1fafc60
+---
+ services/core/java/com/android/server/audio/AudioService.java | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/core/java/com/android/server/audio/AudioService.java b/services/core/java/com/android/server/audio/AudioService.java
+index 4814fc6781c..009c2150874 100644
+--- a/services/core/java/com/android/server/audio/AudioService.java
++++ b/services/core/java/com/android/server/audio/AudioService.java
+@@ -345,7 +345,7 @@ public class AudioService extends IAudioService.Stub
+      *  STREAM_VOLUME_ALIAS_DEFAULT for other devices (e.g. tablets).*/
+     private final int[] STREAM_VOLUME_ALIAS_VOICE = new int[] {
+         AudioSystem.STREAM_VOICE_CALL,      // STREAM_VOICE_CALL
+-        AudioSystem.STREAM_RING,            // STREAM_SYSTEM
++        AudioSystem.STREAM_MUSIC,           // STREAM_SYSTEM
+         AudioSystem.STREAM_RING,            // STREAM_RING
+         AudioSystem.STREAM_MUSIC,           // STREAM_MUSIC
+         AudioSystem.STREAM_ALARM,           // STREAM_ALARM
+-- 
+2.43.0
+
