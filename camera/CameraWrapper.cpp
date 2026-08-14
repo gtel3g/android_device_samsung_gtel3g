@@ -45,7 +45,11 @@ typedef struct wrapper_camera_device {
     unsigned int notify_count;
     unsigned int data_count;
     unsigned int timestamp_count;
+    unsigned int null_cookie_count;
 } wrapper_camera_device_t;
+
+static pthread_mutex_t gCallbackContextLock = PTHREAD_MUTEX_INITIALIZER;
+static wrapper_camera_device_t *gActiveCallbackContext = NULL;
 
 static inline wrapper_camera_device_t *wrapper_from_device(camera_device_t *device)
 {
@@ -62,6 +66,45 @@ static inline bool wrapper_is_closed(const wrapper_camera_device_t *w)
 {
     return w != NULL &&
            __atomic_load_n(&w->closed, __ATOMIC_ACQUIRE) != 0;
+}
+
+static void set_active_callback_context(wrapper_camera_device_t *w)
+{
+    pthread_mutex_lock(&gCallbackContextLock);
+    gActiveCallbackContext = w;
+    pthread_mutex_unlock(&gCallbackContextLock);
+}
+
+static void clear_active_callback_context(wrapper_camera_device_t *w)
+{
+    pthread_mutex_lock(&gCallbackContextLock);
+    if (gActiveCallbackContext == w)
+        gActiveCallbackContext = NULL;
+    pthread_mutex_unlock(&gCallbackContextLock);
+}
+
+static wrapper_camera_device_t *resolve_callback_context(
+        void *user, const char *callback_name)
+{
+    if (user != NULL)
+        return reinterpret_cast<wrapper_camera_device_t *>(user);
+
+    pthread_mutex_lock(&gCallbackContextLock);
+    wrapper_camera_device_t *w = gActiveCallbackContext;
+    pthread_mutex_unlock(&gCallbackContextLock);
+
+    if (w == NULL) {
+        ALOGE("%s: vendor passed NULL callback cookie and no active context",
+              callback_name);
+        return NULL;
+    }
+
+    if (__atomic_fetch_add(&w->null_cookie_count, 1U, __ATOMIC_RELAXED) < 8U) {
+        ALOGW("%s: vendor passed NULL callback cookie, using active id=%d",
+              callback_name, w->id);
+    }
+
+    return w;
 }
 
 static int check_vendor_module()
@@ -124,7 +167,7 @@ static void wrapper_notify_cb(
         int32_t msg_type, int32_t ext1, int32_t ext2, void *user)
 {
     wrapper_camera_device_t *w =
-            reinterpret_cast<wrapper_camera_device_t *>(user);
+            resolve_callback_context(user, "notify");
 
     if (w == NULL || wrapper_is_closed(w) || w->notify_cb == NULL)
         return;
@@ -145,7 +188,7 @@ static void wrapper_data_cb(
         void *user)
 {
     wrapper_camera_device_t *w =
-            reinterpret_cast<wrapper_camera_device_t *>(user);
+            resolve_callback_context(user, "data");
 
     if (w == NULL || wrapper_is_closed(w) || w->data_cb == NULL)
         return;
@@ -166,7 +209,7 @@ static void wrapper_data_cb_timestamp(
         void *user)
 {
     wrapper_camera_device_t *w =
-            reinterpret_cast<wrapper_camera_device_t *>(user);
+            resolve_callback_context(user, "timestamp");
 
     if (w == NULL || wrapper_is_closed(w) ||
         w->data_cb_timestamp == NULL)
@@ -186,12 +229,10 @@ static camera_memory_t *wrapper_get_memory(
         int fd, size_t buf_size, unsigned int num_bufs, void *user)
 {
     wrapper_camera_device_t *w =
-            reinterpret_cast<wrapper_camera_device_t *>(user);
+            resolve_callback_context(user, "get_memory");
 
-    if (w == NULL) {
-        ALOGE("get_memory: wrapper context missing");
+    if (w == NULL)
         return NULL;
-    }
 
     if (wrapper_is_closed(w)) {
         ALOGV("get_memory id=%d after close: ignored", w->id);
@@ -252,6 +293,15 @@ static void camera_set_callbacks(
     w->notify_count = 0;
     w->data_count = 0;
     w->timestamp_count = 0;
+    w->null_cookie_count = 0;
+
+    /*
+     * The stock T561/SC8830 HAL sometimes invokes callbacks with a NULL
+     * callback cookie instead of the user pointer supplied here.  Its
+     * camera implementation is effectively singleton, so retain the
+     * currently active wrapper as a compatibility fallback.
+     */
+    set_active_callback_context(w);
 
     ALOGI("set_callbacks id=%d framework_user=%p", w->id, user);
 
@@ -640,21 +690,20 @@ static int camera_device_close(hw_device_t *device)
     int ret = 0;
 
     /*
-     * The stock SC8830 HAL may still issue callbacks from worker threads
-     * shortly after common.close() returns.  The vendor callback user is
-     * 'w', so freeing it here creates a use-after-free.
+     * The stock SC8830 HAL can issue request_memory from a worker thread
+     * while common.close() is still running, and may pass a NULL callback
+     * cookie.  Keep this context active until vendor close has returned.
      *
-     * Mark the context closed before entering the vendor close path.  All
-     * callback bridges drop callbacks once this flag is visible.
-     *
-     * For bring-up we intentionally retain the tiny wrapper context until
-     * the camera-provider process exits.  This avoids racing late vendor
-     * callbacks.  A refcounted retirement scheme can replace this later.
+     * The HAL has also been observed to issue late callbacks around close,
+     * so the wrapper object is intentionally retained for bring-up instead
+     * of being freed here.  Once vendor close returns, mark it closed and
+     * remove it from the NULL-cookie fallback slot.
      */
-    __atomic_store_n(&w->closed, 1, __ATOMIC_RELEASE);
-
     if (w->vendor != NULL && w->vendor->common.close != NULL)
         ret = w->vendor->common.close(&w->vendor->common);
+
+    __atomic_store_n(&w->closed, 1, __ATOMIC_RELEASE);
+    clear_active_callback_context(w);
 
     ALOGI("close id=%d callback context retired ret=%d", w->id, ret);
     return ret;
