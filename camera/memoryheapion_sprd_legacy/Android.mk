@@ -4,7 +4,7 @@ ifneq ($(filter gtel3g,$(TARGET_DEVICE)),)
 
 include $(CLEAR_VARS)
 
-LOCAL_MODULE := libmemoryheapion_t561
+LOCAL_MODULE := libmemoryheapion_sprd_legacy
 
 LOCAL_SRC_FILES := \
     MemoryHeapIon.cpp

@@ -31,4 +31,4 @@ include $(BUILD_SHARED_LIBRARY)
 endif
 
 # Legacy MemoryHeapIon ABI for stock T561 camera HAL
-include $(LOCAL_PATH)/memoryheapion_t561/Android.mk
+include $(LOCAL_PATH)/memoryheapion_sprd_legacy/Android.mk

@@ -14,6 +14,7 @@
 #define LOG_NDEBUG 0
 #define LOG_TAG "T561_CAMWRAP"
 
+#include <dlfcn.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -25,8 +26,22 @@
 #include <log/log.h>
 #include <utils/Timers.h>
 
+
 static pthread_mutex_t gVendorModuleLock = PTHREAD_MUTEX_INITIALIZER;
 static camera_module_t *gVendorModule = NULL;
+
+
+#define T561_MAX_MEMORY_BRIDGES 64
+
+typedef struct t561_memory_bridge {
+    int used;
+    int fd;
+
+    void *framework_base;
+    void *vendor_base;
+
+    size_t size;
+} t561_memory_bridge_t;
 
 typedef struct wrapper_camera_device {
     camera_device_t base;
@@ -42,6 +57,12 @@ typedef struct wrapper_camera_device {
     camera_request_memory get_memory;
     void *framework_user;
 
+    t561_memory_bridge_t memory_bridges[
+            T561_MAX_MEMORY_BRIDGES];
+
+    unsigned int memory_bridge_log_count;
+    unsigned int release_bridge_log_count;
+
     unsigned int notify_count;
     unsigned int data_count;
     unsigned int timestamp_count;
@@ -49,6 +70,7 @@ typedef struct wrapper_camera_device {
 } wrapper_camera_device_t;
 
 static pthread_mutex_t gCallbackContextLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t gMemoryBridgeLock = PTHREAD_MUTEX_INITIALIZER;
 static wrapper_camera_device_t *gActiveCallbackContext = NULL;
 
 static inline wrapper_camera_device_t *wrapper_from_device(camera_device_t *device)
@@ -105,6 +127,231 @@ static wrapper_camera_device_t *resolve_callback_context(
     }
 
     return w;
+}
+
+
+
+typedef void *(*t561_get_base_for_fd_fn)(int fd);
+
+static pthread_once_t gT561MemoryHelperOnce =
+        PTHREAD_ONCE_INIT;
+
+static void *gT561MemoryCompatHandle = NULL;
+static t561_get_base_for_fd_fn gT561GetBaseForFd = NULL;
+
+static void t561_resolve_memory_helper()
+{
+    /*
+     * libmemoryheapion_sprd_legacy is already loaded as a private dependency
+     * of camera.vendor.sc8830.so.
+     *
+     * RTLD_DEFAULT cannot see its unique compatibility helper because
+     * the stock HAL dependency lives in a local linker scope.
+     *
+     * Obtain an explicit local handle instead. RTLD_LOCAL is important:
+     * do not promote the legacy MemoryHeapIon C++ symbols into global
+     * lookup scope.
+     */
+    gT561MemoryCompatHandle =
+        dlopen("libmemoryheapion_sprd_legacy.so",
+               RTLD_NOW | RTLD_LOCAL);
+
+    if (gT561MemoryCompatHandle == NULL) {
+        ALOGW("T561 memory bridge: dlopen by soname failed: %s",
+              dlerror());
+
+        /*
+         * Fallback for old non-Treble vendor layouts.
+         */
+        gT561MemoryCompatHandle =
+            dlopen("/system/vendor/lib/libmemoryheapion_sprd_legacy.so",
+                   RTLD_NOW | RTLD_LOCAL);
+    }
+
+    if (gT561MemoryCompatHandle == NULL) {
+        ALOGE("T561 memory bridge: compat dlopen failed: %s",
+              dlerror());
+        return;
+    }
+
+    dlerror();
+
+    void *symbol =
+        dlsym(gT561MemoryCompatHandle,
+              "sprd_legacy_memoryheapion_get_base_for_fd");
+
+    const char *error = dlerror();
+
+    if (error != NULL || symbol == NULL) {
+        ALOGE("T561 memory bridge: helper dlsym failed: %s",
+              error != NULL ? error : "symbol is NULL");
+        return;
+    }
+
+    gT561GetBaseForFd =
+        reinterpret_cast<t561_get_base_for_fd_fn>(symbol);
+
+    ALOGI("T561 memory bridge: compatibility helper resolved");
+}
+
+static void *t561_get_legacy_base_for_fd(int fd)
+{
+    pthread_once(
+            &gT561MemoryHelperOnce,
+            t561_resolve_memory_helper);
+
+    if (gT561GetBaseForFd == NULL)
+        return NULL;
+
+    return gT561GetBaseForFd(fd);
+}
+
+static void remember_memory_bridge(
+        wrapper_camera_device_t *w,
+        int fd,
+        camera_memory_t *memory,
+        size_t buf_size,
+        unsigned int num_bufs)
+{
+    if (w == NULL ||
+        fd < 0 ||
+        memory == NULL ||
+        memory->data == NULL ||
+        num_bufs == 0) {
+        return;
+    }
+
+    if (buf_size > ((size_t)-1) / num_bufs)
+        return;
+
+    size_t total_size = buf_size * num_bufs;
+
+    void *vendor_base =
+        t561_get_legacy_base_for_fd(fd);
+
+    if (vendor_base == NULL) {
+        if (w->memory_bridge_log_count++ < 16) {
+            ALOGW("memory bridge id=%d fd=%d: "
+                  "legacy vendor base not found, framework=%p",
+                  w->id, fd, memory->data);
+        }
+        return;
+    }
+
+    pthread_mutex_lock(&gMemoryBridgeLock);
+
+    int slot = -1;
+    int free_slot = -1;
+
+    for (int i = 0; i < T561_MAX_MEMORY_BRIDGES; ++i) {
+        t561_memory_bridge_t *entry =
+                &w->memory_bridges[i];
+
+        if (entry->used) {
+            if (entry->fd == fd ||
+                entry->framework_base == memory->data) {
+                slot = i;
+                break;
+            }
+        } else if (free_slot < 0) {
+            free_slot = i;
+        }
+    }
+
+    if (slot < 0)
+        slot = free_slot;
+
+    if (slot >= 0) {
+        t561_memory_bridge_t *entry =
+                &w->memory_bridges[slot];
+
+        entry->used = 1;
+        entry->fd = fd;
+        entry->framework_base = memory->data;
+        entry->vendor_base = vendor_base;
+        entry->size = total_size;
+
+        if (w->memory_bridge_log_count++ < 16) {
+            ALOGI("memory bridge id=%d fd=%d "
+                  "framework=%p vendor=%p size=%zu",
+                  w->id,
+                  fd,
+                  entry->framework_base,
+                  entry->vendor_base,
+                  entry->size);
+        }
+    } else {
+        ALOGE("memory bridge id=%d: table full", w->id);
+    }
+
+    pthread_mutex_unlock(&gMemoryBridgeLock);
+}
+
+static const void *translate_recording_opaque(
+        wrapper_camera_device_t *w,
+        const void *opaque)
+{
+    if (w == NULL || opaque == NULL)
+        return opaque;
+
+    uintptr_t address =
+        reinterpret_cast<uintptr_t>(opaque);
+
+    const void *translated = opaque;
+
+    pthread_mutex_lock(&gMemoryBridgeLock);
+
+    for (int i = 0; i < T561_MAX_MEMORY_BRIDGES; ++i) {
+        t561_memory_bridge_t *entry =
+                &w->memory_bridges[i];
+
+        if (!entry->used ||
+            entry->framework_base == NULL ||
+            entry->vendor_base == NULL ||
+            entry->size == 0) {
+            continue;
+        }
+
+        uintptr_t framework_start =
+            reinterpret_cast<uintptr_t>(
+                    entry->framework_base);
+
+        uintptr_t framework_end =
+            framework_start + entry->size;
+
+        if (framework_end < framework_start)
+            continue;
+
+        if (address >= framework_start &&
+            address < framework_end) {
+
+            size_t offset =
+                address - framework_start;
+
+            translated =
+                reinterpret_cast<const void *>(
+                    reinterpret_cast<uintptr_t>(
+                            entry->vendor_base)
+                    + offset);
+
+            if (w->release_bridge_log_count++ < 32) {
+                ALOGI("release bridge id=%d fd=%d "
+                      "framework=%p -> vendor=%p "
+                      "offset=%zu",
+                      w->id,
+                      entry->fd,
+                      opaque,
+                      translated,
+                      offset);
+            }
+
+            break;
+        }
+    }
+
+    pthread_mutex_unlock(&gMemoryBridgeLock);
+
+    return translated;
 }
 
 static int check_vendor_module()
@@ -247,7 +494,21 @@ static camera_memory_t *wrapper_get_memory(
     ALOGV("get_memory id=%d fd=%d size=%zu count=%u",
           w->id, fd, buf_size, num_bufs);
 
-    return w->get_memory(fd, buf_size, num_bufs, w->framework_user);
+    camera_memory_t *memory =
+        w->get_memory(
+                fd,
+                buf_size,
+                num_bufs,
+                w->framework_user);
+
+    remember_memory_bridge(
+            w,
+            fd,
+            memory,
+            buf_size,
+            num_bufs);
+
+    return memory;
 }
 
 /********************************************************************
@@ -405,16 +666,83 @@ static int camera_store_meta_data_in_buffers(
         return -EINVAL;
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
-    ALOGI("store_meta_data_in_buffers id=%d enable=%d", w->id, enable);
 
-    if (w->vendor->ops->store_meta_data_in_buffers == NULL)
+    ALOGI("store_meta_data_in_buffers id=%d enable=%d",
+          w->id, enable);
+
+    /*
+     * T561's stock SC8830 HAL uses the old CameraSource metadata ABI.
+     * Android 9 cannot consume that ABI directly.
+     *
+     * There is another vendor quirk: startRecording() refuses to start
+     * unless the vendor metadata heap has first been allocated
+     * (mMetaBufCount >= kPreviewBufferCount), even when actual recording
+     * data is going to be delivered as raw YUV.
+     *
+     * Prime the vendor metadata heap once, then immediately disable its
+     * metadata mode. The vendor disable call returns INVALID_OPERATION,
+     * but it still sets mIsStoreMetaData=false and leaves mMetaBufCount
+     * populated.
+     *
+     * Finally report metadata mode as unsupported to Android so
+     * CameraSource falls back to DATA_CALLBACK_YUV.
+     */
+    if (enable) {
+        if (w->vendor->ops->store_meta_data_in_buffers == NULL) {
+            ALOGW("store_meta_data_in_buffers id=%d: "
+                  "vendor metadata op missing, forcing YUV fallback",
+                  w->id);
+            return -ENOSYS;
+        }
+
+        int prime_ret =
+            w->vendor->ops->store_meta_data_in_buffers(
+                    w->vendor, 1);
+
+        ALOGI("store_meta_data_in_buffers id=%d: "
+              "vendor metadata heap prime ret=%d",
+              w->id, prime_ret);
+
+        if (prime_ret != 0) {
+            ALOGE("store_meta_data_in_buffers id=%d: "
+                  "failed to prime vendor metadata heap: %d",
+                  w->id, prime_ret);
+
+            return -ENOSYS;
+        }
+
+        int disable_ret =
+            w->vendor->ops->store_meta_data_in_buffers(
+                    w->vendor, 0);
+
+        ALOGI("store_meta_data_in_buffers id=%d: "
+              "vendor metadata disabled ret=%d "
+              "(ignored, forcing raw YUV)",
+              w->id, disable_ret);
+
         return -ENOSYS;
+    }
 
-    int ret =
-        w->vendor->ops->store_meta_data_in_buffers(w->vendor, enable);
+    /*
+     * Android calls us again with enable=0 after the metadata request
+     * fails. Ensure the vendor remains in raw-YUV mode, but deliberately
+     * ignore its INVALID_OPERATION result.
+     */
+    if (w->vendor->ops->store_meta_data_in_buffers != NULL) {
+        int disable_ret =
+            w->vendor->ops->store_meta_data_in_buffers(
+                    w->vendor, 0);
 
-    ALOGI("store_meta_data_in_buffers id=%d ret=%d", w->id, ret);
-    return ret;
+        ALOGI("store_meta_data_in_buffers id=%d: "
+              "YUV mode accepted, vendor disable ret=%d ignored",
+              w->id, disable_ret);
+    } else {
+        ALOGI("store_meta_data_in_buffers id=%d: "
+              "YUV mode accepted",
+              w->id);
+    }
+
+    return 0;
 }
 
 static int camera_start_recording(camera_device_t *device)
@@ -464,10 +792,22 @@ static void camera_release_recording_frame(
     if (!valid_device(device, __func__))
         return;
 
-    wrapper_camera_device_t *w = wrapper_from_device(device);
+    wrapper_camera_device_t *w =
+            wrapper_from_device(device);
 
-    if (w->vendor->ops->release_recording_frame != NULL)
-        w->vendor->ops->release_recording_frame(w->vendor, opaque);
+    if (w->vendor->ops->release_recording_frame == NULL)
+        return;
+
+    const void *vendor_opaque =
+        translate_recording_opaque(w, opaque);
+
+    ALOGV("release_recording_frame id=%d "
+          "opaque=%p vendor_opaque=%p",
+          w->id, opaque, vendor_opaque);
+
+    w->vendor->ops->release_recording_frame(
+            w->vendor,
+            vendor_opaque);
 }
 
 static int camera_auto_focus(camera_device_t *device)

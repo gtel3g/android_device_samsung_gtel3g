@@ -64,7 +64,111 @@ enum ION_SPRD_CUSTOM_CMD {
 #include <video/ion_sprd.h>
 #endif
 
+#include <pthread.h>
+
 namespace android {
+
+/*
+ * T561 camera compatibility:
+ *
+ * The legacy camera HAL keeps the virtual address returned by its
+ * MemoryHeapIon mapping. Android 9's camera HIDL bridge maps the same
+ * shared ION fd again and later returns that second virtual address to
+ * release_recording_frame().
+ *
+ * Keep fd -> legacy vendor mapping here so CameraWrapper can translate
+ * Android's mapping back to the address expected by the stock HAL.
+ */
+#define T561_LEGACY_ION_MAP_SLOTS 128
+
+struct t561_legacy_ion_map {
+    bool used;
+    int fd;
+    void *base;
+    size_t size;
+};
+
+static pthread_mutex_t gT561LegacyIonMapLock =
+        PTHREAD_MUTEX_INITIALIZER;
+
+static struct t561_legacy_ion_map
+        gT561LegacyIonMaps[T561_LEGACY_ION_MAP_SLOTS];
+
+static void t561_register_legacy_ion_map(
+        int fd, void *base, size_t size)
+{
+    if (fd < 0 || base == NULL || base == MAP_FAILED || size == 0)
+        return;
+
+    pthread_mutex_lock(&gT561LegacyIonMapLock);
+
+    int free_slot = -1;
+
+    for (int i = 0; i < T561_LEGACY_ION_MAP_SLOTS; ++i) {
+        if (gT561LegacyIonMaps[i].used) {
+            if (gT561LegacyIonMaps[i].fd == fd) {
+                gT561LegacyIonMaps[i].base = base;
+                gT561LegacyIonMaps[i].size = size;
+
+                pthread_mutex_unlock(&gT561LegacyIonMapLock);
+                return;
+            }
+        } else if (free_slot < 0) {
+            free_slot = i;
+        }
+    }
+
+    if (free_slot >= 0) {
+        gT561LegacyIonMaps[free_slot].used = true;
+        gT561LegacyIonMaps[free_slot].fd = fd;
+        gT561LegacyIonMaps[free_slot].base = base;
+        gT561LegacyIonMaps[free_slot].size = size;
+    }
+
+    pthread_mutex_unlock(&gT561LegacyIonMapLock);
+}
+
+static void t561_unregister_legacy_ion_map(
+        int fd, void *base)
+{
+    pthread_mutex_lock(&gT561LegacyIonMapLock);
+
+    for (int i = 0; i < T561_LEGACY_ION_MAP_SLOTS; ++i) {
+        if (!gT561LegacyIonMaps[i].used)
+            continue;
+
+        if (gT561LegacyIonMaps[i].fd == fd &&
+            gT561LegacyIonMaps[i].base == base) {
+            memset(&gT561LegacyIonMaps[i], 0,
+                   sizeof(gT561LegacyIonMaps[i]));
+            break;
+        }
+    }
+
+    pthread_mutex_unlock(&gT561LegacyIonMapLock);
+}
+
+extern "C" __attribute__((visibility("default")))
+void *sprd_legacy_memoryheapion_get_base_for_fd(int fd)
+{
+    void *base = NULL;
+
+    pthread_mutex_lock(&gT561LegacyIonMapLock);
+
+    for (int i = 0; i < T561_LEGACY_ION_MAP_SLOTS; ++i) {
+        if (gT561LegacyIonMaps[i].used &&
+            gT561LegacyIonMaps[i].fd == fd) {
+            base = gT561LegacyIonMaps[i].base;
+            break;
+        }
+    }
+
+    pthread_mutex_unlock(&gT561LegacyIonMapLock);
+
+    return base;
+}
+
+
 
 int  MemoryHeapIon::Get_phy_addr_from_ion(int buffer_fd, int *phy_addr, int *size){
     int fd = open("/dev/ion", O_SYNC);
@@ -411,6 +515,7 @@ status_t MemoryHeapIon::ionInit(int ionFd, void *base, int size, int flags,
     mIonDeviceFd = ionFd;
     mIonHandle = handle;
     MemoryHeapBase::init(ionMapFd, base, size, flags, device);
+	t561_register_legacy_ion_map(MemoryHeapBase::getHeapID(), MemoryHeapBase::getBase(), MemoryHeapBase::getSize());
     return NO_ERROR;
 }
 
@@ -482,12 +587,17 @@ status_t MemoryHeapIon::mapIonFd(int fd, size_t size, unsigned long memory_type,
      * above for consistency sake with how MemoryHeapPmem works.
      */
     MemoryHeapBase::init(fd_data.fd, base, size, uflags, NULL);
+	t561_register_legacy_ion_map(MemoryHeapBase::getHeapID(), MemoryHeapBase::getBase(), MemoryHeapBase::getSize());
 
     return NO_ERROR;
 }
 
 MemoryHeapIon::~MemoryHeapIon()
 {
+	t561_unregister_legacy_ion_map(
+	        MemoryHeapBase::getHeapID(),
+	        MemoryHeapBase::getBase());
+
     struct ion_handle_data data;
 
     data.handle = mIonHandle;
