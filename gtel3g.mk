@@ -51,8 +51,8 @@ PRODUCT_PACKAGES += \
 	sensors.sc8830
 
 PRODUCT_COPY_FILES += \
-    device/samsung/gtel3g/rootdir/collect_t561_display_logs_early.sh:$(TARGET_COPY_OUT_SYSTEM)/bin/collect_t561_display_logs_early.sh \
-    device/samsung/gtel3g/rootdir/t561-display-logger.rc:$(TARGET_COPY_OUT_SYSTEM)/etc/init/t561-display-logger.rc
+    device/samsung/gtel3g/rootdir/collect_t561_full_camera_logs.sh:system/bin/collect_t561_full_camera_logs.sh \
+    device/samsung/gtel3g/rootdir/t561-camera-logs.rc:system/etc/init/t561-camera-logs.rc
 
 # WiFi
 $(call inherit-product, hardware/broadcom/wlan/bcmdhd/config/config-bcm.mk)

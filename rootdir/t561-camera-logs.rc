@@ -1,0 +1,13 @@
+# Samsung SM-T561 / gtel3g camera/full diagnostic autostart
+#
+# Start after post-fs-data so /cache and Android data paths are available,
+# but still early enough to preserve camera/provider boot failures.
+
+service t561-camera-logs /system/bin/sh /system/bin/collect_t561_full_camera_logs.sh
+    user root
+    group root system log camera media sdcard_rw
+    disabled
+    oneshot
+
+on post-fs-data
+    start t561-camera-logs
