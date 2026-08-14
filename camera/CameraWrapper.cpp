@@ -34,6 +34,7 @@ typedef struct wrapper_camera_device {
 
     int id;
     int released;
+    volatile int closed;
 
     camera_notify_callback notify_cb;
     camera_data_callback data_cb;
@@ -55,6 +56,12 @@ static inline const wrapper_camera_device_t *wrapper_from_device_const(
         const camera_device_t *device)
 {
     return reinterpret_cast<const wrapper_camera_device_t *>(device);
+}
+
+static inline bool wrapper_is_closed(const wrapper_camera_device_t *w)
+{
+    return w != NULL &&
+           __atomic_load_n(&w->closed, __ATOMIC_ACQUIRE) != 0;
 }
 
 static int check_vendor_module()
@@ -119,7 +126,7 @@ static void wrapper_notify_cb(
     wrapper_camera_device_t *w =
             reinterpret_cast<wrapper_camera_device_t *>(user);
 
-    if (w == NULL || w->notify_cb == NULL)
+    if (w == NULL || wrapper_is_closed(w) || w->notify_cb == NULL)
         return;
 
     if (w->notify_count++ < 8) {
@@ -140,7 +147,7 @@ static void wrapper_data_cb(
     wrapper_camera_device_t *w =
             reinterpret_cast<wrapper_camera_device_t *>(user);
 
-    if (w == NULL || w->data_cb == NULL)
+    if (w == NULL || wrapper_is_closed(w) || w->data_cb == NULL)
         return;
 
     if (w->data_count++ < 8) {
@@ -161,7 +168,8 @@ static void wrapper_data_cb_timestamp(
     wrapper_camera_device_t *w =
             reinterpret_cast<wrapper_camera_device_t *>(user);
 
-    if (w == NULL || w->data_cb_timestamp == NULL)
+    if (w == NULL || wrapper_is_closed(w) ||
+        w->data_cb_timestamp == NULL)
         return;
 
     if (w->timestamp_count++ < 8) {
@@ -180,8 +188,18 @@ static camera_memory_t *wrapper_get_memory(
     wrapper_camera_device_t *w =
             reinterpret_cast<wrapper_camera_device_t *>(user);
 
-    if (w == NULL || w->get_memory == NULL) {
-        ALOGE("get_memory: callback missing");
+    if (w == NULL) {
+        ALOGE("get_memory: wrapper context missing");
+        return NULL;
+    }
+
+    if (wrapper_is_closed(w)) {
+        ALOGV("get_memory id=%d after close: ignored", w->id);
+        return NULL;
+    }
+
+    if (w->get_memory == NULL) {
+        ALOGE("get_memory id=%d: framework callback missing", w->id);
         return NULL;
     }
 
@@ -622,13 +640,23 @@ static int camera_device_close(hw_device_t *device)
     int ret = 0;
 
     /*
-     * Do not synthesize vendor->ops->release() here.
-     * Preserve framework/vendor HAL lifetime semantics exactly.
+     * The stock SC8830 HAL may still issue callbacks from worker threads
+     * shortly after common.close() returns.  The vendor callback user is
+     * 'w', so freeing it here creates a use-after-free.
+     *
+     * Mark the context closed before entering the vendor close path.  All
+     * callback bridges drop callbacks once this flag is visible.
+     *
+     * For bring-up we intentionally retain the tiny wrapper context until
+     * the camera-provider process exits.  This avoids racing late vendor
+     * callbacks.  A refcounted retirement scheme can replace this later.
      */
+    __atomic_store_n(&w->closed, 1, __ATOMIC_RELEASE);
+
     if (w->vendor != NULL && w->vendor->common.close != NULL)
         ret = w->vendor->common.close(&w->vendor->common);
 
-    free(w);
+    ALOGI("close id=%d callback context retired ret=%d", w->id, ret);
     return ret;
 }
 
@@ -688,6 +716,7 @@ static int camera_device_open(
     w->id = atoi(name);
     w->vendor = vendor_device;
     w->released = 0;
+    __atomic_store_n(&w->closed, 0, __ATOMIC_RELAXED);
 
     w->base.common.tag = HARDWARE_DEVICE_TAG;
     w->base.common.version = vendor_device->common.version;
