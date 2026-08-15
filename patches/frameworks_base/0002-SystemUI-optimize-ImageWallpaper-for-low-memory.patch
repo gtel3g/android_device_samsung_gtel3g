@@ -1,0 +1,125 @@
+diff --git a/packages/SystemUI/src/com/android/systemui/ImageWallpaper.java b/packages/SystemUI/src/com/android/systemui/ImageWallpaper.java
+index 50d862dee29..66025f7f66b 100644
+--- a/packages/SystemUI/src/com/android/systemui/ImageWallpaper.java
++++ b/packages/SystemUI/src/com/android/systemui/ImageWallpaper.java
+@@ -20,6 +20,7 @@ import android.app.WallpaperManager;
+ import android.content.ComponentCallbacks2;
+ import android.graphics.Bitmap;
+ import android.graphics.Canvas;
++import android.graphics.Paint;
+ import android.graphics.Rect;
+ import android.graphics.RectF;
+ import android.graphics.Region.Op;
+@@ -84,6 +85,11 @@ public class ImageWallpaper extends WallpaperService {
+         float mYOffset = 0f;
+         float mScale = 1f;
+ 
++        // Bitmap is scaled into a RGB565 surface. Filtering keeps the scaled
++        // wallpaper smooth, while dithering reduces visible RGB565 banding.
++        private final Paint mWallpaperPaint =
++                new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
++
+         private Display mDefaultDisplay;
+         private final DisplayInfo mTmpDisplayInfo = new DisplayInfo();
+ 
+@@ -127,6 +133,10 @@ public class ImageWallpaper extends WallpaperService {
+ 
+             super.onCreate(surfaceHolder);
+ 
++            // Low-memory legacy graphics optimization:
++            // static wallpaper does not need an alpha channel.
++            surfaceHolder.setFormat(android.graphics.PixelFormat.RGB_565);
++
+             //noinspection ConstantConditions
+             mDefaultDisplay = getSystemService(WindowManager.class).getDefaultDisplay();
+             setOffsetNotificationsEnabled(false);
+@@ -155,9 +165,10 @@ public class ImageWallpaper extends WallpaperService {
+                 hasWallpaper = false;
+             }
+ 
+-            // Force the wallpaper to cover the screen in both dimensions
+-            int surfaceWidth = Math.max(displayInfo.logicalWidth, mBackgroundWidth);
+-            int surfaceHeight = Math.max(displayInfo.logicalHeight, mBackgroundHeight);
++            // Low-memory legacy graphics optimization:
++            // keep ImageWallpaper surface exactly at display resolution.
++            int surfaceWidth = displayInfo.logicalWidth;
++            int surfaceHeight = displayInfo.logicalHeight;
+ 
+             // Used a fixed size surface, because we are special.  We can do
+             // this because we know the current design of window animations doesn't
+@@ -250,7 +261,7 @@ public class ImageWallpaper extends WallpaperService {
+             // This means that the bitmap should be loaded synchronously if
+             // it was already unloaded.
+             if (mBackground == null) {
+-                updateBitmap(mWallpaperManager.getBitmap(true /* hardware */));
++                updateBitmap(mWallpaperManager.getBitmap(false /* hardware */));
+             }
+             mSurfaceRedrawNeeded = true;
+             drawFrame();
+@@ -311,8 +322,9 @@ public class ImageWallpaper extends WallpaperService {
+                 }
+ 
+                 // Left align the scaled image
+-                mScale = Math.max(1f, Math.max(dw / (float) mBackground.getWidth(),
+-                        dh / (float) mBackground.getHeight()));
++                // Allow wallpaper to scale down to the display-sized surface.
++                mScale = Math.max(dw / (float) mBackground.getWidth(),
++                        dh / (float) mBackground.getHeight());
+                 final int availw = (int) (mBackground.getWidth() * mScale) - dw;
+                 final int availh = (int) (mBackground.getHeight() * mScale) - dh;
+                 int xPixels = (int) (availw * mXOffset);
+@@ -337,7 +349,9 @@ public class ImageWallpaper extends WallpaperService {
+                     Log.d(TAG, "Redrawing wallpaper");
+                 }
+ 
+-                drawWallpaperWithCanvas(sh, availw, availh, xPixels, yPixels);
++                // xPixels/yPixels describe how much scaled wallpaper exceeds
++                // the display. Draw with a negative translation to crop it.
++                drawWallpaperWithCanvas(sh, availw, availh, -xPixels, -yPixels);
+                 scheduleUnloadWallpaper();
+             } finally {
+                 Trace.traceEnd(Trace.TRACE_TAG_VIEW);
+@@ -366,7 +380,7 @@ public class ImageWallpaper extends WallpaperService {
+                 protected Bitmap doInBackground(Void... params) {
+                     Throwable exception;
+                     try {
+-                        return mWallpaperManager.getBitmap(true /* hardware */);
++                        return mWallpaperManager.getBitmap(false /* hardware */);
+                     } catch (RuntimeException | OutOfMemoryError e) {
+                         exception = e;
+                     }
+@@ -391,7 +405,7 @@ public class ImageWallpaper extends WallpaperService {
+                     }
+ 
+                     try {
+-                        return mWallpaperManager.getBitmap(true /* hardware */);
++                        return mWallpaperManager.getBitmap(false /* hardware */);
+                     } catch (RuntimeException | OutOfMemoryError e) {
+                         Log.w(TAG, "Unable to load default wallpaper!", e);
+                     }
+@@ -487,7 +501,7 @@ public class ImageWallpaper extends WallpaperService {
+         }
+ 
+         private void drawWallpaperWithCanvas(SurfaceHolder sh, int w, int h, int left, int top) {
+-            Canvas c = sh.lockHardwareCanvas();
++            Canvas c = sh.lockCanvas();
+             if (c != null) {
+                 try {
+                     if (DEBUG) {
+@@ -505,9 +519,13 @@ public class ImageWallpaper extends WallpaperService {
+                     }
+                     if (mBackground != null) {
+                         RectF dest = new RectF(left, top, right, bottom);
+-                        Log.i(TAG, "Redrawing in rect: " + dest + " with surface size: "
+-                                + mLastRequestedWidth + "x" + mLastRequestedHeight);
+-                        c.drawBitmap(mBackground, null, dest, null);
++                        if (DEBUG) {
++                            Log.d(TAG, "Redrawing in rect: " + dest
++                                    + " with surface size: "
++                                    + mLastRequestedWidth + "x"
++                                    + mLastRequestedHeight);
++                        }
++                        c.drawBitmap(mBackground, null, dest, mWallpaperPaint);
+                     }
+                 } finally {
+                     sh.unlockCanvasAndPost(c);
