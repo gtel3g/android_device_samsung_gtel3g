@@ -44,7 +44,8 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # Camera
 PRODUCT_PACKAGES += \
 	Snap \
-	camera.sc8830
+	camera.sc8830 \
+	libmemoryheapion_sprd_legacy
 
 # Sensors
 PRODUCT_PACKAGES += \

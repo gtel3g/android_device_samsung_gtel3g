@@ -105,5 +105,4 @@ TARGET_USES_SENSORS_WRAPPER := true
 
 # Shims
 TARGET_LD_SHIM_LIBS += \
-	/system/vendor/lib/hw/camera.sc8830.so|libmemoryheapion.so \
  	/system/vendor/lib/egl/libGLES_mali.so|libion_shim.so
