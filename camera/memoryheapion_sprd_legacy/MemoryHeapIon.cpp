@@ -69,7 +69,7 @@ enum ION_SPRD_CUSTOM_CMD {
 namespace android {
 
 /*
- * T561 camera compatibility:
+ * Legacy camera compatibility:
  *
  * The legacy camera HAL keeps the virtual address returned by its
  * MemoryHeapIon mapping. Android 9's camera HIDL bridge maps the same
@@ -79,38 +79,35 @@ namespace android {
  * Keep fd -> legacy vendor mapping here so CameraWrapper can translate
  * Android's mapping back to the address expected by the stock HAL.
  */
-#define T561_LEGACY_ION_MAP_SLOTS 128
+#define SPRD_LEGACY_ION_MAP_SLOTS 128
 
-struct t561_legacy_ion_map {
+struct sprd_legacy_ion_map {
     bool used;
     int fd;
     void *base;
-    size_t size;
 };
 
-static pthread_mutex_t gT561LegacyIonMapLock =
+static pthread_mutex_t gSprdLegacyIonMapLock =
         PTHREAD_MUTEX_INITIALIZER;
 
-static struct t561_legacy_ion_map
-        gT561LegacyIonMaps[T561_LEGACY_ION_MAP_SLOTS];
+static struct sprd_legacy_ion_map
+        gSprdLegacyIonMaps[SPRD_LEGACY_ION_MAP_SLOTS];
 
-static void t561_register_legacy_ion_map(
-        int fd, void *base, size_t size)
+static void register_legacy_ion_map(int fd, void *base)
 {
-    if (fd < 0 || base == NULL || base == MAP_FAILED || size == 0)
+    if (fd < 0 || base == NULL || base == MAP_FAILED)
         return;
 
-    pthread_mutex_lock(&gT561LegacyIonMapLock);
+    pthread_mutex_lock(&gSprdLegacyIonMapLock);
 
     int free_slot = -1;
 
-    for (int i = 0; i < T561_LEGACY_ION_MAP_SLOTS; ++i) {
-        if (gT561LegacyIonMaps[i].used) {
-            if (gT561LegacyIonMaps[i].fd == fd) {
-                gT561LegacyIonMaps[i].base = base;
-                gT561LegacyIonMaps[i].size = size;
+    for (int i = 0; i < SPRD_LEGACY_ION_MAP_SLOTS; ++i) {
+        if (gSprdLegacyIonMaps[i].used) {
+            if (gSprdLegacyIonMaps[i].fd == fd) {
+                gSprdLegacyIonMaps[i].base = base;
 
-                pthread_mutex_unlock(&gT561LegacyIonMapLock);
+                pthread_mutex_unlock(&gSprdLegacyIonMapLock);
                 return;
             }
         } else if (free_slot < 0) {
@@ -119,33 +116,32 @@ static void t561_register_legacy_ion_map(
     }
 
     if (free_slot >= 0) {
-        gT561LegacyIonMaps[free_slot].used = true;
-        gT561LegacyIonMaps[free_slot].fd = fd;
-        gT561LegacyIonMaps[free_slot].base = base;
-        gT561LegacyIonMaps[free_slot].size = size;
+        gSprdLegacyIonMaps[free_slot].used = true;
+        gSprdLegacyIonMaps[free_slot].fd = fd;
+        gSprdLegacyIonMaps[free_slot].base = base;
     }
 
-    pthread_mutex_unlock(&gT561LegacyIonMapLock);
+    pthread_mutex_unlock(&gSprdLegacyIonMapLock);
 }
 
-static void t561_unregister_legacy_ion_map(
+static void unregister_legacy_ion_map(
         int fd, void *base)
 {
-    pthread_mutex_lock(&gT561LegacyIonMapLock);
+    pthread_mutex_lock(&gSprdLegacyIonMapLock);
 
-    for (int i = 0; i < T561_LEGACY_ION_MAP_SLOTS; ++i) {
-        if (!gT561LegacyIonMaps[i].used)
+    for (int i = 0; i < SPRD_LEGACY_ION_MAP_SLOTS; ++i) {
+        if (!gSprdLegacyIonMaps[i].used)
             continue;
 
-        if (gT561LegacyIonMaps[i].fd == fd &&
-            gT561LegacyIonMaps[i].base == base) {
-            memset(&gT561LegacyIonMaps[i], 0,
-                   sizeof(gT561LegacyIonMaps[i]));
+        if (gSprdLegacyIonMaps[i].fd == fd &&
+            gSprdLegacyIonMaps[i].base == base) {
+            memset(&gSprdLegacyIonMaps[i], 0,
+                   sizeof(gSprdLegacyIonMaps[i]));
             break;
         }
     }
 
-    pthread_mutex_unlock(&gT561LegacyIonMapLock);
+    pthread_mutex_unlock(&gSprdLegacyIonMapLock);
 }
 
 extern "C" __attribute__((visibility("default")))
@@ -153,22 +149,20 @@ void *sprd_legacy_memoryheapion_get_base_for_fd(int fd)
 {
     void *base = NULL;
 
-    pthread_mutex_lock(&gT561LegacyIonMapLock);
+    pthread_mutex_lock(&gSprdLegacyIonMapLock);
 
-    for (int i = 0; i < T561_LEGACY_ION_MAP_SLOTS; ++i) {
-        if (gT561LegacyIonMaps[i].used &&
-            gT561LegacyIonMaps[i].fd == fd) {
-            base = gT561LegacyIonMaps[i].base;
+    for (int i = 0; i < SPRD_LEGACY_ION_MAP_SLOTS; ++i) {
+        if (gSprdLegacyIonMaps[i].used &&
+            gSprdLegacyIonMaps[i].fd == fd) {
+            base = gSprdLegacyIonMaps[i].base;
             break;
         }
     }
 
-    pthread_mutex_unlock(&gT561LegacyIonMapLock);
+    pthread_mutex_unlock(&gSprdLegacyIonMapLock);
 
     return base;
 }
-
-
 
 int  MemoryHeapIon::Get_phy_addr_from_ion(int buffer_fd, int *phy_addr, int *size){
     int fd = open("/dev/ion", O_SYNC);
@@ -515,10 +509,10 @@ status_t MemoryHeapIon::ionInit(int ionFd, void *base, int size, int flags,
     mIonDeviceFd = ionFd;
     mIonHandle = handle;
     MemoryHeapBase::init(ionMapFd, base, size, flags, device);
-	t561_register_legacy_ion_map(MemoryHeapBase::getHeapID(), MemoryHeapBase::getBase(), MemoryHeapBase::getSize());
+    register_legacy_ion_map(
+            MemoryHeapBase::getHeapID(), MemoryHeapBase::getBase());
     return NO_ERROR;
 }
-
 
 status_t MemoryHeapIon::mapIonFd(int fd, size_t size, unsigned long memory_type, int uflags)
 {
@@ -587,16 +581,17 @@ status_t MemoryHeapIon::mapIonFd(int fd, size_t size, unsigned long memory_type,
      * above for consistency sake with how MemoryHeapPmem works.
      */
     MemoryHeapBase::init(fd_data.fd, base, size, uflags, NULL);
-	t561_register_legacy_ion_map(MemoryHeapBase::getHeapID(), MemoryHeapBase::getBase(), MemoryHeapBase::getSize());
+    register_legacy_ion_map(
+            MemoryHeapBase::getHeapID(), MemoryHeapBase::getBase());
 
     return NO_ERROR;
 }
 
 MemoryHeapIon::~MemoryHeapIon()
 {
-	t561_unregister_legacy_ion_map(
-	        MemoryHeapBase::getHeapID(),
-	        MemoryHeapBase::getBase());
+    unregister_legacy_ion_map(
+            MemoryHeapBase::getHeapID(),
+            MemoryHeapBase::getBase());
 
     struct ion_handle_data data;
 

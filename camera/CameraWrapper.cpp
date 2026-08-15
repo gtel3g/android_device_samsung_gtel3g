@@ -1,18 +1,17 @@
 /*
- * T561 / gtel3g legacy camera HAL1 wrapper
+ * Legacy Spreadtrum SC8830 camera HAL1 wrapper
  *
  * Android 9-facing module:
  *     camera.sc8830.so
  *
- * Wrapped stock Samsung/SPRD module:
+ * Wrapped stock Spreadtrum module:
  *     camera.vendor.sc8830.so
  *
- * V0 intentionally does not modify CameraParameters or buffers.
- * Its only job is to bridge/proxy HAL1 calls and provide useful logs.
+ * Bridges the legacy HAL1 ABI to the Android camera framework and applies
+ * the compatibility shims required by the stock vendor implementation.
  */
 
-#define LOG_NDEBUG 0
-#define LOG_TAG "T561_CAMWRAP"
+#define LOG_TAG "SPRD_CAMWRAP"
 
 #include <dlfcn.h>
 #include <errno.h>
@@ -26,14 +25,12 @@
 #include <log/log.h>
 #include <utils/Timers.h>
 
-
 static pthread_mutex_t gVendorModuleLock = PTHREAD_MUTEX_INITIALIZER;
 static camera_module_t *gVendorModule = NULL;
 
+#define SPRD_MAX_MEMORY_BRIDGES 64
 
-#define T561_MAX_MEMORY_BRIDGES 64
-
-typedef struct t561_memory_bridge {
+typedef struct sprd_memory_bridge {
     int used;
     int fd;
 
@@ -41,7 +38,7 @@ typedef struct t561_memory_bridge {
     void *vendor_base;
 
     size_t size;
-} t561_memory_bridge_t;
+} sprd_memory_bridge_t;
 
 typedef struct wrapper_camera_device {
     camera_device_t base;
@@ -57,15 +54,11 @@ typedef struct wrapper_camera_device {
     camera_request_memory get_memory;
     void *framework_user;
 
-    t561_memory_bridge_t memory_bridges[
-            T561_MAX_MEMORY_BRIDGES];
+    sprd_memory_bridge_t memory_bridges[
+            SPRD_MAX_MEMORY_BRIDGES];
 
-    unsigned int memory_bridge_log_count;
-    unsigned int release_bridge_log_count;
-
-    unsigned int notify_count;
-    unsigned int data_count;
-    unsigned int timestamp_count;
+    unsigned int memory_bridge_warn_count;
+    unsigned int release_bridge_warn_count;
     unsigned int null_cookie_count;
 } wrapper_camera_device_t;
 
@@ -76,12 +69,6 @@ static wrapper_camera_device_t *gActiveCallbackContext = NULL;
 static inline wrapper_camera_device_t *wrapper_from_device(camera_device_t *device)
 {
     return reinterpret_cast<wrapper_camera_device_t *>(device);
-}
-
-static inline const wrapper_camera_device_t *wrapper_from_device_const(
-        const camera_device_t *device)
-{
-    return reinterpret_cast<const wrapper_camera_device_t *>(device);
 }
 
 static inline bool wrapper_is_closed(const wrapper_camera_device_t *w)
@@ -121,7 +108,7 @@ static wrapper_camera_device_t *resolve_callback_context(
         return NULL;
     }
 
-    if (__atomic_fetch_add(&w->null_cookie_count, 1U, __ATOMIC_RELAXED) < 8U) {
+    if (__atomic_fetch_add(&w->null_cookie_count, 1U, __ATOMIC_RELAXED) < 4U) {
         ALOGW("%s: vendor passed NULL callback cookie, using active id=%d",
               callback_name, w->id);
     }
@@ -129,17 +116,15 @@ static wrapper_camera_device_t *resolve_callback_context(
     return w;
 }
 
+typedef void *(*sprd_get_base_for_fd_fn)(int fd);
 
-
-typedef void *(*t561_get_base_for_fd_fn)(int fd);
-
-static pthread_once_t gT561MemoryHelperOnce =
+static pthread_once_t gSprdMemoryHelperOnce =
         PTHREAD_ONCE_INIT;
 
-static void *gT561MemoryCompatHandle = NULL;
-static t561_get_base_for_fd_fn gT561GetBaseForFd = NULL;
+static void *gSprdMemoryCompatHandle = NULL;
+static sprd_get_base_for_fd_fn gSprdGetBaseForFd = NULL;
 
-static void t561_resolve_memory_helper()
+static void sprd_resolve_memory_helper()
 {
     /*
      * libmemoryheapion_sprd_legacy is already loaded as a private dependency
@@ -152,24 +137,24 @@ static void t561_resolve_memory_helper()
      * do not promote the legacy MemoryHeapIon C++ symbols into global
      * lookup scope.
      */
-    gT561MemoryCompatHandle =
+    gSprdMemoryCompatHandle =
         dlopen("libmemoryheapion_sprd_legacy.so",
                RTLD_NOW | RTLD_LOCAL);
 
-    if (gT561MemoryCompatHandle == NULL) {
-        ALOGW("T561 memory bridge: dlopen by soname failed: %s",
+    if (gSprdMemoryCompatHandle == NULL) {
+        ALOGW("memory bridge: dlopen by soname failed: %s",
               dlerror());
 
         /*
          * Fallback for old non-Treble vendor layouts.
          */
-        gT561MemoryCompatHandle =
+        gSprdMemoryCompatHandle =
             dlopen("/system/vendor/lib/libmemoryheapion_sprd_legacy.so",
                    RTLD_NOW | RTLD_LOCAL);
     }
 
-    if (gT561MemoryCompatHandle == NULL) {
-        ALOGE("T561 memory bridge: compat dlopen failed: %s",
+    if (gSprdMemoryCompatHandle == NULL) {
+        ALOGE("memory bridge: compat dlopen failed: %s",
               dlerror());
         return;
     }
@@ -177,33 +162,32 @@ static void t561_resolve_memory_helper()
     dlerror();
 
     void *symbol =
-        dlsym(gT561MemoryCompatHandle,
+        dlsym(gSprdMemoryCompatHandle,
               "sprd_legacy_memoryheapion_get_base_for_fd");
 
     const char *error = dlerror();
 
     if (error != NULL || symbol == NULL) {
-        ALOGE("T561 memory bridge: helper dlsym failed: %s",
+        ALOGE("memory bridge: helper dlsym failed: %s",
               error != NULL ? error : "symbol is NULL");
         return;
     }
 
-    gT561GetBaseForFd =
-        reinterpret_cast<t561_get_base_for_fd_fn>(symbol);
+    gSprdGetBaseForFd =
+        reinterpret_cast<sprd_get_base_for_fd_fn>(symbol);
 
-    ALOGI("T561 memory bridge: compatibility helper resolved");
 }
 
-static void *t561_get_legacy_base_for_fd(int fd)
+static void *sprd_get_legacy_base_for_fd(int fd)
 {
     pthread_once(
-            &gT561MemoryHelperOnce,
-            t561_resolve_memory_helper);
+            &gSprdMemoryHelperOnce,
+            sprd_resolve_memory_helper);
 
-    if (gT561GetBaseForFd == NULL)
+    if (gSprdGetBaseForFd == NULL)
         return NULL;
 
-    return gT561GetBaseForFd(fd);
+    return gSprdGetBaseForFd(fd);
 }
 
 static void remember_memory_bridge(
@@ -227,10 +211,10 @@ static void remember_memory_bridge(
     size_t total_size = buf_size * num_bufs;
 
     void *vendor_base =
-        t561_get_legacy_base_for_fd(fd);
+        sprd_get_legacy_base_for_fd(fd);
 
     if (vendor_base == NULL) {
-        if (w->memory_bridge_log_count++ < 16) {
+        if (w->memory_bridge_warn_count++ < 4) {
             ALOGW("memory bridge id=%d fd=%d: "
                   "legacy vendor base not found, framework=%p",
                   w->id, fd, memory->data);
@@ -243,8 +227,8 @@ static void remember_memory_bridge(
     int slot = -1;
     int free_slot = -1;
 
-    for (int i = 0; i < T561_MAX_MEMORY_BRIDGES; ++i) {
-        t561_memory_bridge_t *entry =
+    for (int i = 0; i < SPRD_MAX_MEMORY_BRIDGES; ++i) {
+        sprd_memory_bridge_t *entry =
                 &w->memory_bridges[i];
 
         if (entry->used) {
@@ -262,7 +246,7 @@ static void remember_memory_bridge(
         slot = free_slot;
 
     if (slot >= 0) {
-        t561_memory_bridge_t *entry =
+        sprd_memory_bridge_t *entry =
                 &w->memory_bridges[slot];
 
         entry->used = 1;
@@ -271,15 +255,6 @@ static void remember_memory_bridge(
         entry->vendor_base = vendor_base;
         entry->size = total_size;
 
-        if (w->memory_bridge_log_count++ < 16) {
-            ALOGI("memory bridge id=%d fd=%d "
-                  "framework=%p vendor=%p size=%zu",
-                  w->id,
-                  fd,
-                  entry->framework_base,
-                  entry->vendor_base,
-                  entry->size);
-        }
     } else {
         ALOGE("memory bridge id=%d: table full", w->id);
     }
@@ -298,11 +273,12 @@ static const void *translate_recording_opaque(
         reinterpret_cast<uintptr_t>(opaque);
 
     const void *translated = opaque;
+    bool found = false;
 
     pthread_mutex_lock(&gMemoryBridgeLock);
 
-    for (int i = 0; i < T561_MAX_MEMORY_BRIDGES; ++i) {
-        t561_memory_bridge_t *entry =
+    for (int i = 0; i < SPRD_MAX_MEMORY_BRIDGES; ++i) {
+        sprd_memory_bridge_t *entry =
                 &w->memory_bridges[i];
 
         if (!entry->used ||
@@ -333,23 +309,18 @@ static const void *translate_recording_opaque(
                     reinterpret_cast<uintptr_t>(
                             entry->vendor_base)
                     + offset);
-
-            if (w->release_bridge_log_count++ < 32) {
-                ALOGI("release bridge id=%d fd=%d "
-                      "framework=%p -> vendor=%p "
-                      "offset=%zu",
-                      w->id,
-                      entry->fd,
-                      opaque,
-                      translated,
-                      offset);
-            }
+            found = true;
 
             break;
         }
     }
 
     pthread_mutex_unlock(&gMemoryBridgeLock);
+
+    if (!found && w->release_bridge_warn_count++ < 4) {
+        ALOGW("release bridge id=%d: no mapping for opaque=%p",
+              w->id, opaque);
+    }
 
     return translated;
 }
@@ -364,8 +335,6 @@ static int check_vendor_module()
     if (gVendorModule == NULL) {
         const hw_module_t *module = NULL;
 
-        ALOGI("loading stock HAL: camera.vendor.<ro.hardware>.so");
-
         int ret = hw_get_module_by_class(
                 CAMERA_HARDWARE_MODULE_ID, "vendor", &module);
 
@@ -378,11 +347,7 @@ static int check_vendor_module()
 
         gVendorModule = reinterpret_cast<camera_module_t *>(
                 const_cast<hw_module_t *>(module));
-
-        ALOGI("stock HAL loaded: name='%s' author='%s' module_api=0x%04x",
-              gVendorModule->common.name ? gVendorModule->common.name : "(null)",
-              gVendorModule->common.author ? gVendorModule->common.author : "(null)",
-              gVendorModule->common.module_api_version);
+        ALOGI("stock camera HAL loaded");
     }
 
     pthread_mutex_unlock(&gVendorModuleLock);
@@ -419,11 +384,6 @@ static void wrapper_notify_cb(
     if (w == NULL || wrapper_is_closed(w) || w->notify_cb == NULL)
         return;
 
-    if (w->notify_count++ < 8) {
-        ALOGI("cb notify id=%d type=0x%x ext1=%d ext2=%d",
-              w->id, msg_type, ext1, ext2);
-    }
-
     w->notify_cb(msg_type, ext1, ext2, w->framework_user);
 }
 
@@ -439,11 +399,6 @@ static void wrapper_data_cb(
 
     if (w == NULL || wrapper_is_closed(w) || w->data_cb == NULL)
         return;
-
-    if (w->data_count++ < 8) {
-        ALOGI("cb data id=%d type=0x%x index=%u data=%p metadata=%p",
-              w->id, msg_type, index, data, metadata);
-    }
 
     w->data_cb(msg_type, data, index, metadata, w->framework_user);
 }
@@ -462,12 +417,6 @@ static void wrapper_data_cb_timestamp(
         w->data_cb_timestamp == NULL)
         return;
 
-    if (w->timestamp_count++ < 8) {
-        ALOGI("cb timestamp id=%d type=0x%x index=%u ts=%lld data=%p",
-              w->id, msg_type, index,
-              static_cast<long long>(timestamp), data);
-    }
-
     w->data_cb_timestamp(
             timestamp, msg_type, data, index, w->framework_user);
 }
@@ -482,7 +431,6 @@ static camera_memory_t *wrapper_get_memory(
         return NULL;
 
     if (wrapper_is_closed(w)) {
-        ALOGV("get_memory id=%d after close: ignored", w->id);
         return NULL;
     }
 
@@ -490,9 +438,6 @@ static camera_memory_t *wrapper_get_memory(
         ALOGE("get_memory id=%d: framework callback missing", w->id);
         return NULL;
     }
-
-    ALOGV("get_memory id=%d fd=%d size=%zu count=%u",
-          w->id, fd, buf_size, num_bufs);
 
     camera_memory_t *memory =
         w->get_memory(
@@ -522,13 +467,11 @@ static int camera_set_preview_window(
         return -EINVAL;
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
-    ALOGI("set_preview_window id=%d window=%p", w->id, window);
 
     if (w->vendor->ops->set_preview_window == NULL)
         return -ENOSYS;
 
     int ret = w->vendor->ops->set_preview_window(w->vendor, window);
-    ALOGI("set_preview_window id=%d ret=%d", w->id, ret);
     return ret;
 }
 
@@ -551,20 +494,15 @@ static void camera_set_callbacks(
     w->get_memory = get_memory;
     w->framework_user = user;
 
-    w->notify_count = 0;
-    w->data_count = 0;
-    w->timestamp_count = 0;
     w->null_cookie_count = 0;
 
     /*
-     * The stock T561/SC8830 HAL sometimes invokes callbacks with a NULL
+     * The stock SC8830 HAL sometimes invokes callbacks with a NULL
      * callback cookie instead of the user pointer supplied here.  Its
      * camera implementation is effectively singleton, so retain the
      * currently active wrapper as a compatibility fallback.
      */
     set_active_callback_context(w);
-
-    ALOGI("set_callbacks id=%d framework_user=%p", w->id, user);
 
     if (w->vendor->ops->set_callbacks != NULL) {
         /*
@@ -587,7 +525,6 @@ static void camera_enable_msg_type(camera_device_t *device, int32_t msg_type)
         return;
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
-    ALOGV("enable_msg_type id=%d type=0x%x", w->id, msg_type);
 
     if (w->vendor->ops->enable_msg_type != NULL)
         w->vendor->ops->enable_msg_type(w->vendor, msg_type);
@@ -599,7 +536,6 @@ static void camera_disable_msg_type(camera_device_t *device, int32_t msg_type)
         return;
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
-    ALOGV("disable_msg_type id=%d type=0x%x", w->id, msg_type);
 
     if (w->vendor->ops->disable_msg_type != NULL)
         w->vendor->ops->disable_msg_type(w->vendor, msg_type);
@@ -624,13 +560,13 @@ static int camera_start_preview(camera_device_t *device)
         return -EINVAL;
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
-    ALOGI("start_preview id=%d", w->id);
 
     if (w->vendor->ops->start_preview == NULL)
         return -ENOSYS;
 
     int ret = w->vendor->ops->start_preview(w->vendor);
-    ALOGI("start_preview id=%d ret=%d", w->id, ret);
+    if (ret != 0)
+        ALOGE("start_preview id=%d failed: %d", w->id, ret);
     return ret;
 }
 
@@ -640,7 +576,6 @@ static void camera_stop_preview(camera_device_t *device)
         return;
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
-    ALOGI("stop_preview id=%d", w->id);
 
     if (w->vendor->ops->stop_preview != NULL)
         w->vendor->ops->stop_preview(w->vendor);
@@ -667,11 +602,8 @@ static int camera_store_meta_data_in_buffers(
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
 
-    ALOGI("store_meta_data_in_buffers id=%d enable=%d",
-          w->id, enable);
-
     /*
-     * T561's stock SC8830 HAL uses the old CameraSource metadata ABI.
+     * The stock SC8830 HAL uses the old CameraSource metadata ABI.
      * Android 9 cannot consume that ABI directly.
      *
      * There is another vendor quirk: startRecording() refuses to start
@@ -699,10 +631,6 @@ static int camera_store_meta_data_in_buffers(
             w->vendor->ops->store_meta_data_in_buffers(
                     w->vendor, 1);
 
-        ALOGI("store_meta_data_in_buffers id=%d: "
-              "vendor metadata heap prime ret=%d",
-              w->id, prime_ret);
-
         if (prime_ret != 0) {
             ALOGE("store_meta_data_in_buffers id=%d: "
                   "failed to prime vendor metadata heap: %d",
@@ -711,15 +639,11 @@ static int camera_store_meta_data_in_buffers(
             return -ENOSYS;
         }
 
-        int disable_ret =
-            w->vendor->ops->store_meta_data_in_buffers(
-                    w->vendor, 0);
+        (void)w->vendor->ops->store_meta_data_in_buffers(
+                w->vendor, 0);
 
-        ALOGI("store_meta_data_in_buffers id=%d: "
-              "vendor metadata disabled ret=%d "
-              "(ignored, forcing raw YUV)",
-              w->id, disable_ret);
-
+        ALOGI("metadata mode unsupported for id=%d; using raw YUV",
+              w->id);
         return -ENOSYS;
     }
 
@@ -729,17 +653,8 @@ static int camera_store_meta_data_in_buffers(
      * ignore its INVALID_OPERATION result.
      */
     if (w->vendor->ops->store_meta_data_in_buffers != NULL) {
-        int disable_ret =
-            w->vendor->ops->store_meta_data_in_buffers(
-                    w->vendor, 0);
-
-        ALOGI("store_meta_data_in_buffers id=%d: "
-              "YUV mode accepted, vendor disable ret=%d ignored",
-              w->id, disable_ret);
-    } else {
-        ALOGI("store_meta_data_in_buffers id=%d: "
-              "YUV mode accepted",
-              w->id);
+        (void)w->vendor->ops->store_meta_data_in_buffers(
+                w->vendor, 0);
     }
 
     return 0;
@@ -751,13 +666,13 @@ static int camera_start_recording(camera_device_t *device)
         return -EINVAL;
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
-    ALOGI("start_recording id=%d", w->id);
 
     if (w->vendor->ops->start_recording == NULL)
         return -ENOSYS;
 
     int ret = w->vendor->ops->start_recording(w->vendor);
-    ALOGI("start_recording id=%d ret=%d", w->id, ret);
+    if (ret != 0)
+        ALOGE("start_recording id=%d failed: %d", w->id, ret);
     return ret;
 }
 
@@ -767,7 +682,6 @@ static void camera_stop_recording(camera_device_t *device)
         return;
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
-    ALOGI("stop_recording id=%d", w->id);
 
     if (w->vendor->ops->stop_recording != NULL)
         w->vendor->ops->stop_recording(w->vendor);
@@ -801,10 +715,6 @@ static void camera_release_recording_frame(
     const void *vendor_opaque =
         translate_recording_opaque(w, opaque);
 
-    ALOGV("release_recording_frame id=%d "
-          "opaque=%p vendor_opaque=%p",
-          w->id, opaque, vendor_opaque);
-
     w->vendor->ops->release_recording_frame(
             w->vendor,
             vendor_opaque);
@@ -816,13 +726,13 @@ static int camera_auto_focus(camera_device_t *device)
         return -EINVAL;
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
-    ALOGI("auto_focus id=%d", w->id);
 
     if (w->vendor->ops->auto_focus == NULL)
         return -ENOSYS;
 
     int ret = w->vendor->ops->auto_focus(w->vendor);
-    ALOGI("auto_focus id=%d ret=%d", w->id, ret);
+    if (ret != 0)
+        ALOGE("auto_focus id=%d failed: %d", w->id, ret);
     return ret;
 }
 
@@ -832,13 +742,13 @@ static int camera_cancel_auto_focus(camera_device_t *device)
         return -EINVAL;
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
-    ALOGI("cancel_auto_focus id=%d", w->id);
 
     if (w->vendor->ops->cancel_auto_focus == NULL)
         return -ENOSYS;
 
     int ret = w->vendor->ops->cancel_auto_focus(w->vendor);
-    ALOGI("cancel_auto_focus id=%d ret=%d", w->id, ret);
+    if (ret != 0)
+        ALOGE("cancel_auto_focus id=%d failed: %d", w->id, ret);
     return ret;
 }
 
@@ -848,13 +758,13 @@ static int camera_take_picture(camera_device_t *device)
         return -EINVAL;
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
-    ALOGI("take_picture id=%d", w->id);
 
     if (w->vendor->ops->take_picture == NULL)
         return -ENOSYS;
 
     int ret = w->vendor->ops->take_picture(w->vendor);
-    ALOGI("take_picture id=%d ret=%d", w->id, ret);
+    if (ret != 0)
+        ALOGE("take_picture id=%d failed: %d", w->id, ret);
     return ret;
 }
 
@@ -864,13 +774,13 @@ static int camera_cancel_picture(camera_device_t *device)
         return -EINVAL;
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
-    ALOGI("cancel_picture id=%d", w->id);
 
     if (w->vendor->ops->cancel_picture == NULL)
         return -ENOSYS;
 
     int ret = w->vendor->ops->cancel_picture(w->vendor);
-    ALOGI("cancel_picture id=%d ret=%d", w->id, ret);
+    if (ret != 0)
+        ALOGE("cancel_picture id=%d failed: %d", w->id, ret);
     return ret;
 }
 
@@ -882,17 +792,11 @@ static int camera_set_parameters(
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
 
-    ALOGI("set_parameters id=%d len=%zu",
-          w->id, params ? strlen(params) : 0u);
-
     if (w->vendor->ops->set_parameters == NULL)
         return -ENOSYS;
-
-    /*
-     * V0: pass the parameter string through unchanged.
-     */
     int ret = w->vendor->ops->set_parameters(w->vendor, params);
-    ALOGI("set_parameters id=%d ret=%d", w->id, ret);
+    if (ret != 0)
+        ALOGE("set_parameters id=%d failed: %d", w->id, ret);
     return ret;
 }
 
@@ -905,17 +809,7 @@ static char *camera_get_parameters(camera_device_t *device)
 
     if (w->vendor->ops->get_parameters == NULL)
         return NULL;
-
-    /*
-     * V0: return the vendor-owned parameter block unchanged.
-     * camera_put_parameters() below returns it to the same vendor HAL.
-     */
-    char *params = w->vendor->ops->get_parameters(w->vendor);
-
-    ALOGI("get_parameters id=%d ptr=%p len=%zu",
-          w->id, params, params ? strlen(params) : 0u);
-
-    return params;
+    return w->vendor->ops->get_parameters(w->vendor);
 }
 
 static void camera_put_parameters(
@@ -925,8 +819,6 @@ static void camera_put_parameters(
         return;
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
-
-    ALOGV("put_parameters id=%d ptr=%p", w->id, params);
 
     if (w->vendor->ops->put_parameters != NULL)
         w->vendor->ops->put_parameters(w->vendor, params);
@@ -940,17 +832,11 @@ static int camera_send_command(
 
     wrapper_camera_device_t *w = wrapper_from_device(device);
 
-    ALOGI("send_command id=%d cmd=%d arg1=%d arg2=%d",
-          w->id, cmd, arg1, arg2);
-
     if (w->vendor->ops->send_command == NULL)
         return -ENOSYS;
 
-    int ret = w->vendor->ops->send_command(
+    return w->vendor->ops->send_command(
             w->vendor, cmd, arg1, arg2);
-
-    ALOGI("send_command id=%d cmd=%d ret=%d", w->id, cmd, ret);
-    return ret;
 }
 
 static void camera_release(camera_device_t *device)
@@ -964,8 +850,6 @@ static void camera_release(camera_device_t *device)
         ALOGW("release id=%d already released", w->id);
         return;
     }
-
-    ALOGI("release id=%d", w->id);
 
     if (w->vendor->ops->release != NULL)
         w->vendor->ops->release(w->vendor);
@@ -1024,9 +908,6 @@ static int camera_device_close(hw_device_t *device)
     wrapper_camera_device_t *w =
             reinterpret_cast<wrapper_camera_device_t *>(device);
 
-    ALOGI("close id=%d wrapper=%p vendor=%p released=%d",
-          w->id, w, w->vendor, w->released);
-
     int ret = 0;
 
     /*
@@ -1034,10 +915,9 @@ static int camera_device_close(hw_device_t *device)
      * while common.close() is still running, and may pass a NULL callback
      * cookie.  Keep this context active until vendor close has returned.
      *
-     * The HAL has also been observed to issue late callbacks around close,
-     * so the wrapper object is intentionally retained for bring-up instead
-     * of being freed here.  Once vendor close returns, mark it closed and
-     * remove it from the NULL-cookie fallback slot.
+     * The HAL can also issue late callbacks around close, so keep the
+     * wrapper allocation alive after vendor close. Once close returns, mark
+     * it closed and remove it from the NULL-cookie fallback slot.
      */
     if (w->vendor != NULL && w->vendor->common.close != NULL)
         ret = w->vendor->common.close(&w->vendor->common);
@@ -1045,7 +925,11 @@ static int camera_device_close(hw_device_t *device)
     __atomic_store_n(&w->closed, 1, __ATOMIC_RELEASE);
     clear_active_callback_context(w);
 
-    ALOGI("close id=%d callback context retired ret=%d", w->id, ret);
+    if (ret != 0)
+        ALOGE("camera id=%d close failed: %d", w->id, ret);
+    else
+        ALOGI("camera id=%d closed", w->id);
+
     return ret;
 }
 
@@ -1068,8 +952,6 @@ static int camera_device_open(
         ALOGE("stock HAL has no module open() method");
         return -ENOSYS;
     }
-
-    ALOGI("open request id='%s'", name);
 
     hw_device_t *vendor_hw_device = NULL;
 
@@ -1116,8 +998,7 @@ static int camera_device_open(
 
     *device = &w->base.common;
 
-    ALOGI("open id=%d OK wrapper=%p vendor=%p vendor_dev_api=0x%04x",
-          w->id, w, vendor_device, vendor_device->common.version);
+    ALOGI("camera id=%d opened", w->id);
 
     return 0;
 }
@@ -1133,9 +1014,7 @@ static int camera_get_number_of_cameras()
         return 0;
     }
 
-    int count = gVendorModule->get_number_of_cameras();
-    ALOGI("get_number_of_cameras -> %d", count);
-    return count;
+    return gVendorModule->get_number_of_cameras();
 }
 
 static int camera_get_camera_info(int camera_id, camera_info *info)
@@ -1156,12 +1035,8 @@ static int camera_get_camera_info(int camera_id, camera_info *info)
 
     ret = gVendorModule->get_camera_info(camera_id, info);
 
-    if (ret == 0) {
-        ALOGI("get_camera_info id=%d facing=%d orientation=%d",
-              camera_id, info->facing, info->orientation);
-    } else {
+    if (ret != 0)
         ALOGE("get_camera_info id=%d ret=%d", camera_id, ret);
-    }
 
     return ret;
 }
@@ -1176,8 +1051,8 @@ extern "C" camera_module_t HAL_MODULE_INFO_SYM = {
         .module_api_version = CAMERA_MODULE_API_VERSION_1_0,
         .hal_api_version = HARDWARE_HAL_API_VERSION,
         .id = CAMERA_HARDWARE_MODULE_ID,
-        .name = "Samsung T561 SC8830 Camera HAL1 Wrapper",
-        .author = "T561 LineageOS port",
+        .name = "Legacy Spreadtrum SC8830 Camera HAL1 Wrapper",
+        .author = "LineageOS",
         .methods = &gCameraModuleMethods,
         .dso = NULL,
         .reserved = {0},
