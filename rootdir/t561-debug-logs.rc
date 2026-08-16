@@ -1,0 +1,10 @@
+# Samsung SM-T561 / gtel3g generic debug logger
+
+service t561-debug-logs /system/bin/sh /system/bin/collect_t561_full_logs.sh
+    user root
+    group root system log radio camera media graphics input sdcard_rw
+    disabled
+    oneshot
+
+on post-fs-data
+    start t561-debug-logs
