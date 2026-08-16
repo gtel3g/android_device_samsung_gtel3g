@@ -97,6 +97,9 @@ TARGET_SCREEN_WIDTH := 800
 TARGET_OTA_ASSERT_DEVICE := SM-T561,SM-T560,gtel3g,gtelwifi,gtel3gxx,gtelwifixx
 
 # Graphics
+# SPRD HWC does not request framebuffer dithering on gtel3g.
+# Avoid polling the Mali frequency from the framebuffer post path.
+USE_SPRD_DITHER := false
 #TARGET_USES_GRALLOC1 := true
 #TARGET_UPDATED_MALI := true
 
