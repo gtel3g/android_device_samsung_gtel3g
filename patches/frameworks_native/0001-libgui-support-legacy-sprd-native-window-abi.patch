@@ -1,47 +1,3 @@
-diff --git a/libs/gui/Surface.cpp b/libs/gui/Surface.cpp
-index 2de14c8..72308e7 100644
---- a/libs/gui/Surface.cpp
-+++ b/libs/gui/Surface.cpp
-@@ -383,7 +383,11 @@ int Surface::hook_setSwapInterval(ANativeWindow* window, int interval) {
- int Surface::hook_dequeueBuffer(ANativeWindow* window,
-         ANativeWindowBuffer** buffer, int* fenceFd) {
-     Surface* c = getSelf(window);
--    return c->dequeueBuffer(buffer, fenceFd);
-+
-+    int ret = c->dequeueBuffer(buffer, fenceFd);
-+
-+
-+    return ret;
- }
- 
- int Surface::hook_cancelBuffer(ANativeWindow* window,
-@@ -395,6 +399,8 @@ int Surface::hook_cancelBuffer(ANativeWindow* window,
- int Surface::hook_queueBuffer(ANativeWindow* window,
-         ANativeWindowBuffer* buffer, int fenceFd) {
-     Surface* c = getSelf(window);
-+
-+
-     return c->queueBuffer(buffer, fenceFd);
- }
- 
-@@ -416,6 +422,8 @@ int Surface::hook_dequeueBuffer_DEPRECATED(ANativeWindow* window,
-         return waitResult;
-     }
-     *buffer = buf;
-+
-+
-     return result;
- }
- 
-@@ -434,6 +442,8 @@ int Surface::hook_lockBuffer_DEPRECATED(ANativeWindow* window,
- int Surface::hook_queueBuffer_DEPRECATED(ANativeWindow* window,
-         ANativeWindowBuffer* buffer) {
-     Surface* c = getSelf(window);
-+
-+
-     return c->queueBuffer(buffer, -1);
- }
- 
 diff --git a/libs/ui/Gralloc2.cpp b/libs/ui/Gralloc2.cpp
 index 918251f..c0e24f2 100644
 --- a/libs/ui/Gralloc2.cpp
@@ -200,39 +156,18 @@ diff --git a/libs/ui/GraphicBufferAllocator.cpp b/libs/ui/GraphicBufferAllocator
 index eaba1ed..630b12f 100644
 --- a/libs/ui/GraphicBufferAllocator.cpp
 +++ b/libs/ui/GraphicBufferAllocator.cpp
-@@ -115,7 +115,37 @@ status_t GraphicBufferAllocator::allocate(uint32_t width, uint32_t height,
+@@ -115,7 +115,16 @@ status_t GraphicBufferAllocator::allocate(uint32_t width, uint32_t height,
      info.format = static_cast<Gralloc2::PixelFormat>(format);
      info.usage = usage;
  
 -    Gralloc2::Error error = mAllocator->allocate(info, stride, handle);
 +    /*
-+     * Legacy SPRD diagnostic:
-+     *
-+     * Do not use the persistent Gralloc2::Allocator here.
-+     * Its stored Mapper reference becomes invalid after SurfaceFlinger
-+     * initialization on this legacy graphics stack.
-+     *
-+     * Re-create it from GraphicBufferMapper's known-good Mapper for
-+     * every allocation. This is intentionally diagnostic for now.
++     * Keep this allocator outside GraphicBufferAllocator: the member-backed
++     * instance is corrupted by the legacy SPRD native-window ABI. Reuse one
++     * known-good instance instead of querying IAllocator for every buffer.
 +     */
-+    /*
-+     * Legacy SPRD diagnostic.
-+     *
-+     * GraphicBufferAllocator::mMapper gets overwritten after the
-+     * first framebuffer allocation. Do not dereference that member.
-+     * Fetch GraphicBufferMapper singleton directly for every request.
-+     */
-+
-+
-+
-+    GraphicBufferMapper& sprdGBM =
-+            GraphicBufferMapper::getInstance();
-+
-+    const Gralloc2::Mapper& sprdMapper =
-+            sprdGBM.getGrallocMapper();
-+
-+
-+    Gralloc2::Allocator sprdAllocator(sprdMapper);
++    static const Gralloc2::Allocator sprdAllocator(
++            GraphicBufferMapper::getInstance().getGrallocMapper());
 +
 +    Gralloc2::Error error =
 +            sprdAllocator.allocate(info, stride, handle);
