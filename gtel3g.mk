@@ -52,11 +52,11 @@ PRODUCT_PACKAGES += \
 	sensors.sc8830
 
 # Generic T561 debug logger
-ifneq ($(filter eng userdebug,$(TARGET_BUILD_VARIANT)),)
-PRODUCT_COPY_FILES += \
-    device/samsung/gtel3g/rootdir/collect_t561_full_logs.sh:system/bin/collect_t561_full_logs.sh \
-    device/samsung/gtel3g/rootdir/t561-debug-logs.rc:system/etc/init/t561-debug-logs.rc
-endif
+# ifneq ($(filter eng userdebug,$(TARGET_BUILD_VARIANT)),)
+# PRODUCT_COPY_FILES += \
+#     device/samsung/gtel3g/rootdir/collect_t561_full_logs.sh:system/bin/collect_t561_full_logs.sh \
+#     device/samsung/gtel3g/rootdir/t561-debug-logs.rc:system/etc/init/t561-debug-logs.rc
+# endif
 
 # WiFi
 $(call inherit-product, hardware/broadcom/wlan/bcmdhd/config/config-bcm.mk)
