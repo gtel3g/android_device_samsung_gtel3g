@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Keep the shutter button inside the 800x1280 display bounds. -->
+    <dimen name="shutter_offset">11dp</dimen>
+</resources>
