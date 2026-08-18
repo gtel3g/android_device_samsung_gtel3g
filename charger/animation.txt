@@ -1,0 +1,12 @@
+animation: 3 2 charger/battery_scale
+fail: charger/battery_fail
+
+# Center the battery percentage below the animation.
+percent_display: c 760 255 255 255 255 font_log
+
+frame: 750 0 19
+frame: 750 0 39
+frame: 750 0 59
+frame: 750 0 79
+frame: 750 80 95
+frame: 750 0 100

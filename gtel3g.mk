@@ -67,3 +67,8 @@ PRODUCT_DEVICE := gtel3g
 PRODUCT_BRAND := samsung
 PRODUCT_MANUFACTURER := samsung
 PRODUCT_MODEL := SM-T561
+
+# Offline charging percentage
+PRODUCT_PACKAGES += \
+    font_log.png \
+    gtel3g_charger_animation
