@@ -5,10 +5,15 @@
 # Unfiltered logcat, kernel snapshots and rotating device-state snapshots.
 # Logs are stored directly in /cache; no archives are created.
 #
+# Manual start from the source tree:
+#   adb root
+#   adb push device/samsung/gtel3g/tools/debug/collect_t561_full_logs.sh /data/local/tmp/collect_t561_full_logs.sh
+#   adb shell chmod 0755 /data/local/tmp/collect_t561_full_logs.sh
+#   adb shell /system/bin/sh /data/local/tmp/collect_t561_full_logs.sh
+#
 # Stop and collect:
 #   adb root
 #   adb shell touch /cache/t561-logs/current/STOP
-#   adb shell 'while [ "$(getprop init.svc.t561-debug-logs)" != stopped ]; do sleep 1; done'
 #   adb pull /cache/t561-logs .
 #
 
@@ -193,7 +198,7 @@ save_state_snapshot()
         uptime 2>&1
 
         echo "elapsed_seconds=$(elapsed)"
-        echo "logger_service=$(getprop init.svc.t561-debug-logs)"
+        echo "logger_mode=manual"
         echo "sys.boot_completed=$(getprop sys.boot_completed)"
         echo "dev.bootcomplete=$(getprop dev.bootcomplete)"
         echo "selinux=$(getenforce 2>/dev/null)"
