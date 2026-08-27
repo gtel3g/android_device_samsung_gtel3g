@@ -52,7 +52,6 @@ WIFI_DRIVER_NVRAM_PATH_PARAM := "/sys/module/dhd/parameters/nvram_path"
 WIFI_DRIVER_NVRAM_PATH := "/vendor/etc/wifi/nvram_net.txt"
 TARGET_NEEDS_NETD_DIRECT_CONNECT_RULE := true
 
-
 # Kernel
 TARGET_KERNEL_CONFIG := gtel3g_defconfig
 TARGET_KERNEL_SOURCE := kernel/samsung/gtel3g
@@ -68,8 +67,6 @@ TARGET_OTA_ASSERT_DEVICE := SM-T561,SM-T560,gtel3g,gtelwifi,gtel3gxx,gtelwifixx
 # SPRD HWC does not request framebuffer dithering on gtel3g.
 # Avoid polling the Mali frequency from the framebuffer post path.
 USE_SPRD_DITHER := false
-#TARGET_USES_GRALLOC1 := true
-#TARGET_UPDATED_MALI := true
 
 # Sensors
 TARGET_USES_SENSORS_WRAPPER := true
