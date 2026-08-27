@@ -71,4 +71,4 @@ PRODUCT_MODEL := SM-T561
 # Offline charging percentage
 PRODUCT_PACKAGES += \
     font_log.png \
-    gtel3g_charger_animation
+    sprd_charger_animation
