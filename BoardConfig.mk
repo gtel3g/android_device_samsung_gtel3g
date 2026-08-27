@@ -30,7 +30,6 @@ BOARD_CACHEIMAGE_PARTITION_SIZE := 209715200
 BOARD_CACHEIMAGE_FILE_SYSTEM_TYPE := ext4
 BOARD_FLASH_BLOCK_SIZE := 131072
 TARGET_USERIMAGES_USE_EXT4 := true
-BOARD_HAS_LARGE_FILESYSTEM := true
 
 # Camera HAL1 hack
 TARGET_HAS_LEGACY_CAMERA_HAL1 := true
@@ -51,9 +50,7 @@ WIFI_DRIVER_FW_PATH_STA := "/vendor/etc/wifi/bcmdhd_sta.bin"
 WIFI_DRIVER_FW_PATH_AP := "/vendor/etc/wifi/bcmdhd_apsta.bin"
 WIFI_DRIVER_NVRAM_PATH_PARAM := "/sys/module/dhd/parameters/nvram_path"
 WIFI_DRIVER_NVRAM_PATH := "/vendor/etc/wifi/nvram_net.txt"
-WIFI_BAND := 802_11_ABG
 TARGET_NEEDS_NETD_DIRECT_CONNECT_RULE := true
-BOARD_HAVE_SAMSUNG_WIFI := true
 
 # Camera
 ###########################################
