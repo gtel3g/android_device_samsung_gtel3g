@@ -52,35 +52,6 @@ WIFI_DRIVER_NVRAM_PATH_PARAM := "/sys/module/dhd/parameters/nvram_path"
 WIFI_DRIVER_NVRAM_PATH := "/vendor/etc/wifi/nvram_net.txt"
 TARGET_NEEDS_NETD_DIRECT_CONNECT_RULE := true
 
-# Camera
-###########################################
-TARGET_CAMERA_OPEN_SOURCE := true
-
-# select camera 2M,3M,5M,8M
-CAMERA_SUPPORT_SIZE := 5M
-FRONT_CAMERA_SUPPORT_SIZE := 2M
-TARGET_BOARD_NO_FRONT_SENSOR := false
-TARGET_BOARD_CAMERA_FLASH_CTRL := false
-
-#face detect
-TARGET_BOARD_CAMERA_FACE_DETECT := false
-
-#sensor interface
-TARGET_BOARD_BACK_CAMERA_INTERFACE := ccir
-TARGET_BOARD_FRONT_CAMERA_INTERFACE := ccir
-
-TARGET_BOARD_CAMERA_HAL_VERSION := HAL1.0
-
-#select camera zsl cap mode
-TARGET_BOARD_CAMERA_CAPTURE_MODE := false
-
-#rotation capture
-TARGET_BOARD_CAMERA_ROTATION_CAPTURE := false
-
-#select mipi d-phy mode(none, phya, phyb, phyab)
-TARGET_BOARD_FRONT_CAMERA_MIPI := phyb
-TARGET_BOARD_BACK_CAMERA_MIPI := phyab
-##########################################
 
 # Kernel
 TARGET_KERNEL_CONFIG := gtel3g_defconfig
