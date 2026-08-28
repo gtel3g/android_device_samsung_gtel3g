@@ -68,3 +68,4 @@ PRODUCT_PACKAGES += \
 
 # Excluded hardware features
 PRODUCT_COPY_FILES += device/samsung/gtel3g/configs/permissions/gtel3g_excluded_hardware.xml:$(TARGET_COPY_OUT_SYSTEM)/etc/permissions/gtel3g_excluded_hardware.xml
+
