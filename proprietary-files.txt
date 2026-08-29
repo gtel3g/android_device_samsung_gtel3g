@@ -27,3 +27,29 @@ lib/libuvdenoise.so
 # HAL
 lib/hw/camera.sc8830.so:lib/hw/camera.vendor.sc8830.so
 lib/hw/sensors.sc8830.so:lib/hw/sensors.vendor.sc8830.so
+
+# Legacy SCX30G proprietary blobs
+bin/gpsd
+bin/gps.cer
+lib/libsprd_agps_agent.so
+lib/hw/gps.default.so
+lib/libfactoryutil.so
+lib/libatparser.so
+vendor/firmware/vbc_eq
+bin/macloader
+bin/nvitemd
+bin/refnotify
+bin/at_distributor
+bin/engpc
+bin/ext_data.sh
+bin/ext_kill.sh
+bin/ext_symlink.sh
+lib/libsecnativefeature.so
+lib/libomission_avoidance.so
+lib/libomx_aacdec_sprd.so
+lib/libomx_mp3dec_sprd.so
+lib/libomx_avcdec_hw_sprd.so
+lib/libomx_avcenc_hw_sprd.so
+lib/libomx_vpxdec_hw_sprd.so
+lib/libomx_m4vh263dec_hw_sprd.so
+lib/libomx_m4vh263enc_hw_sprd.so

@@ -30,3 +30,17 @@ ro.ril.gprsclass=10
 ro.telephony.ril.config=setPrefNwTypeOnUnsolConnected
 ro.ril.telephony.mqanelements=6
 persist.sys.sprd.modemreset=0
+
+# Display
+ro.sf.lcd_density=213
+ro.sf.lcd_width=129
+ro.sf.lcd_height=207
+ro.product.hardware=PIKEAYOUNG2DTV_V1.0.0
+
+# Memory
+ro.config.swappiness=100
+ro.config.zram.disksize=512M
+
+# Multi-user
+fw.max_users=3
+fw.show_multiuserui=1

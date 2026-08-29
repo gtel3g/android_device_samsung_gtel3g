@@ -23,8 +23,8 @@ DEVICE_PACKAGE_OVERLAYS += $(LOCAL_PATH)/overlay
 # Inherit from vendor tree
 $(call inherit-product-if-exists, vendor/samsung/gtel3g/gtel3g-vendor.mk)
 
-# Inherit from scx30g-common device configuration
-$(call inherit-product, device/samsung/scx30g-common/common.mk)
+# Inherit from SC8830 platform configuration
+$(call inherit-product, device/samsung/scx35-common/common.mk)
 
 # Telephony / RIL
 PRODUCT_PACKAGES += \
@@ -36,19 +36,7 @@ PRODUCT_PACKAGES += \
 	libsecril-client \
 	libsecril-shim \
 	modemd \
-	modem_control \
-	at_distributor.rc \
-	data.rc \
-	dns.rc \
-	engpc.rc \
-	gtel3g-ril.rc \
-	kill_phone.rc \
-	modem_control.rc \
-	modemd.rc \
-	nvitemd.rc \
-	phoneserver.rc \
-	refnotify.rc \
-	smd_symlink.rc
+	modem_control
 
 PRODUCT_PROPERTY_OVERRIDES += \
 	ro.radio.modemtype=w \
@@ -57,7 +45,19 @@ PRODUCT_PROPERTY_OVERRIDES += \
 
 PRODUCT_COPY_FILES += \
 	frameworks/native/data/etc/android.hardware.telephony.gsm.xml:$(TARGET_COPY_OUT_SYSTEM)/etc/permissions/android.hardware.telephony.gsm.xml \
-	$(LOCAL_PATH)/ril/init/rild.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/rild.legacy.rc
+	$(LOCAL_PATH)/ril/init/at_distributor.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/at_distributor.rc \
+	$(LOCAL_PATH)/ril/init/data.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/data.rc \
+	$(LOCAL_PATH)/ril/init/dns.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/dns.rc \
+	$(LOCAL_PATH)/ril/init/engpc.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/engpc.rc \
+	$(LOCAL_PATH)/ril/init/gtel3g-ril.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/gtel3g-ril.rc \
+	$(LOCAL_PATH)/ril/init/kill_phone.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/kill_phone.rc \
+	$(LOCAL_PATH)/ril/init/modem_control.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/modem_control.rc \
+	$(LOCAL_PATH)/ril/init/modemd.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/modemd.rc \
+	$(LOCAL_PATH)/ril/init/nvitemd.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/nvitemd.rc \
+	$(LOCAL_PATH)/ril/init/phoneserver.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/phoneserver.rc \
+	$(LOCAL_PATH)/ril/init/refnotify.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/refnotify.rc \
+	$(LOCAL_PATH)/ril/init/rild.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/rild.legacy.rc \
+	$(LOCAL_PATH)/ril/init/smd_symlink.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/smd_symlink.rc
 
 # Boot animation
 TARGET_SCREEN_HEIGHT := 1280
@@ -105,3 +105,7 @@ PRODUCT_PACKAGES += \
 # Excluded hardware features
 PRODUCT_COPY_FILES += device/samsung/gtel3g/configs/permissions/gtel3g_excluded_hardware.xml:$(TARGET_COPY_OUT_SYSTEM)/etc/permissions/gtel3g_excluded_hardware.xml
 
+
+# Root filesystem
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/rootdir/fstab.sc8830:root/fstab.sc8830

@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Inherit from scx30g common configs
--include device/samsung/scx30g-common/BoardConfigCommon.mk
+# Inherit from SC8830 platform configuration
+-include device/samsung/scx35-common/BoardConfigCommon.mk
 
 # Inherit from the proprietary version
 -include vendor/samsung/gtel3g/BoardConfigVendor.mk
@@ -86,3 +86,6 @@ TARGET_USES_SENSORS_WRAPPER := true
 # Shims
 TARGET_LD_SHIM_LIBS += \
  	/system/vendor/lib/egl/libGLES_mali.so|libion_shim.so
+
+# Recovery
+TARGET_RECOVERY_FSTAB := device/samsung/gtel3g/rootdir/fstab.sc8830
