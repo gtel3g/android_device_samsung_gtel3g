@@ -1,0 +1,28 @@
+service phoneserver_t /system/vendor/bin/phoneserver -m t
+    class core
+    user root
+    group radio system shell dhcp
+    disabled
+    oneshot
+
+service phoneserver_w /system/vendor/bin/phoneserver -m w
+    class core
+    user root
+    group radio system shell dhcp
+    disabled
+    oneshot
+    setenv LD_PRELOAD /vendor/lib/libphoneserver_shim.so
+
+service phoneserver_l /system/vendor/bin/phoneserver -m l
+    class core
+    user root
+    group radio system shell dhcp
+    disabled
+    oneshot
+
+service phoneserver_tl /system/vendor/bin/phoneserver -m tl
+    class core
+    user root
+    group radio system shell dhcp
+    disabled
+    oneshot

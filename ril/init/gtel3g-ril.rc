@@ -1,0 +1,22 @@
+# Samsung Galaxy Tab E 3G (SM-T561) radio setup
+
+on early-boot
+    mkdir /dev/rpipe 0550 radio radio
+    exec -- /system/bin/mknod -m 666 /dev/rpipe/ril.vt.0 p
+    exec -- /system/bin/mknod -m 666 /dev/rpipe/ril.vt.1 p
+    exec -- /system/bin/mknod -m 666 /dev/rpipe/ril.vt.2 p
+
+on boot
+    chown system system /sys/class/switch/sprd_simdet/state
+    write /proc/sys/net/ipv6/conf/rmnet0/accept_ra 2
+    write /proc/sys/net/ipv6/conf/rmnet1/accept_ra 2
+    write /proc/sys/net/ipv6/conf/rmnet2/accept_ra 2
+    setprop ro.telephony.call_ring.multiple 0
+
+on property:ro.config.ksm.support=true
+    symlink /dev/spipe_w1 /dev/vbpipe1
+    symlink /dev/spipe_w2 /dev/vbpipe2
+    symlink /dev/spipe_w3 /dev/vbpipe3
+    symlink /dev/spipe_w6 /dev/vbpipe6
+    start refnotify_w
+    start nvitemd_w

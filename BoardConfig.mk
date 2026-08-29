@@ -18,6 +18,18 @@
 # Inherit from the proprietary version
 -include vendor/samsung/gtel3g/BoardConfigVendor.mk
 
+# Telephony / RIL
+BOARD_PROVIDES_LIBRIL := true
+TARGET_SYSTEM_PROP += device/samsung/gtel3g/system.prop
+
+# Legacy proprietary service compatibility
+TARGET_PROCESS_SDK_VERSION_OVERRIDE += \
+    /system/vendor/bin/hw/android.hardware.camera.provider@2.4-service=22 \
+    /system/vendor/bin/hw/android.hardware.media.omx@1.0-service=22
+
+# Device-specific VINTF and SELinux policy
+DEVICE_MANIFEST_FILE += device/samsung/gtel3g/configs/manifest.xml
+
 # Bootloader
 TARGET_BOOTLOADER_BOARD_NAME := SC7730SE
 

@@ -14,6 +14,9 @@
 
 LOCAL_PATH := device/samsung/gtel3g
 
+# Telephony base
+$(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
+
 # Overlays
 DEVICE_PACKAGE_OVERLAYS += $(LOCAL_PATH)/overlay
 
@@ -22,6 +25,39 @@ $(call inherit-product-if-exists, vendor/samsung/gtel3g/gtel3g-vendor.mk)
 
 # Inherit from scx30g-common device configuration
 $(call inherit-product, device/samsung/scx30g-common/common.mk)
+
+# Telephony / RIL
+PRODUCT_PACKAGES += \
+	SamsungServiceMode \
+	librilutils \
+	libril_shim \
+	libphoneserver_shim \
+	libatchannel \
+	libsecril-client \
+	libsecril-shim \
+	modemd \
+	modem_control \
+	at_distributor.rc \
+	data.rc \
+	dns.rc \
+	engpc.rc \
+	gtel3g-ril.rc \
+	kill_phone.rc \
+	modem_control.rc \
+	modemd.rc \
+	nvitemd.rc \
+	phoneserver.rc \
+	refnotify.rc \
+	smd_symlink.rc
+
+PRODUCT_PROPERTY_OVERRIDES += \
+	ro.radio.modemtype=w \
+	rild.libpath=/system/vendor/lib/libsecril-shim.so \
+	ro.com.android.mobiledata=false
+
+PRODUCT_COPY_FILES += \
+	frameworks/native/data/etc/android.hardware.telephony.gsm.xml:$(TARGET_COPY_OUT_SYSTEM)/etc/permissions/android.hardware.telephony.gsm.xml \
+	$(LOCAL_PATH)/ril/init/rild.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/rild.legacy.rc
 
 # Boot animation
 TARGET_SCREEN_HEIGHT := 1280
