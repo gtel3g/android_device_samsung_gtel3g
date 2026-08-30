@@ -105,7 +105,6 @@ PRODUCT_PACKAGES += \
 # Excluded hardware features
 PRODUCT_COPY_FILES += device/samsung/gtel3g/configs/permissions/gtel3g_excluded_hardware.xml:$(TARGET_COPY_OUT_SYSTEM)/etc/permissions/gtel3g_excluded_hardware.xml
 
-
 # Root filesystem
-PRODUCT_COPY_FILES += \
-    $(LOCAL_PATH)/rootdir/fstab.sc8830:root/fstab.sc8830
+PRODUCT_PACKAGES += \
+    fstab.sc8830
