@@ -46,6 +46,9 @@ TARGET_USERIMAGES_USE_EXT4 := true
 # Camera HAL1 hack
 TARGET_HAS_LEGACY_CAMERA_HAL1 := true
 
+# Legacy SPRD camera HAL compatibility
+TARGET_USES_SPRD_LEGACY_CAMERA_WRAPPER := true
+
 # Legacy SPRD gralloc camera buffer usage
 TARGET_ADDITIONAL_GRALLOC_10_USAGE_BITS := 0x04000000
 
