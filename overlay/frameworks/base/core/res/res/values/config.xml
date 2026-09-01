@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+         Keep a larger free-memory reserve on SM-T561 so kswapd starts
+         reclaim before foreground allocations enter direct reclaim.
+    -->
+    <integer name="config_extraFreeKbytesAbsolute">24576</integer>
+</resources>
