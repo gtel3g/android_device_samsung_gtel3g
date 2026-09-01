@@ -83,6 +83,12 @@ TARGET_OTA_ASSERT_DEVICE := SM-T561,SM-T560,gtel3g,gtelwifi,gtel3gxx,gtelwifixx
 # Avoid polling the Mali frequency from the framebuffer post path.
 USE_SPRD_DITHER := false
 
+# SPRD graphics compatibility
+TARGET_USES_SPRD_HIDL_FB_ZERO_COPY := true
+DEVICE_PRIMARYPLANE_USE_RGB565 := true
+USE_OVERLAY_COMPOSER_GPU := true
+SPRD_ALLOW_NONPROTECTED_OVC := true
+
 # Sensors
 TARGET_USES_SENSORS_WRAPPER := true
 
