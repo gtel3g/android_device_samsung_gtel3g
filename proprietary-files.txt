@@ -28,7 +28,7 @@ lib/libuvdenoise.so
 lib/hw/camera.sc8830.so:lib/hw/camera.vendor.sc8830.so
 lib/hw/sensors.sc8830.so:lib/hw/sensors.vendor.sc8830.so
 
-# Legacy SCX30G proprietary blobs
+# Legacy Spreadtrum proprietary blobs
 bin/gpsd
 bin/gps.cer
 lib/libsprd_agps_agent.so

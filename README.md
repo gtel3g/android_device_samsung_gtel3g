@@ -25,8 +25,14 @@ Release Date | June 2015
 * Basic skills / knowledge of Linux
 
 ### Building steps
-* 1. Sync Android source
-* 2. Copy this file ([gtel3g.xml](https://github.com/gtel3g/local_manifests/blob/lineage-16.0/gtel3g.xml)) to `.repo/local_manifests` (if that folder doesn't exist then "mkdir" it)
-* 3. `repo sync` again
-* 4. After syncing source and device-specific repo (from step 2), from your source root folder (where you have synced) open Terminal, `cd` to device/samsung/scx30g-common, type `./patch.sh` (this is the quick patching script)
-* 5. `cd` to your source root again, type `. build/envsetup.sh && brunch gtel3g`
+* 1. Sync LineageOS 16.0 source.
+* 2. Copy `gtel3g.xml` from the gtel3g local manifests repository to `.repo/local_manifests/`.
+* 3. Run `repo sync` again.
+* 4. From the Android source root, apply the required source patches:
+  `device/samsung/gtel3g/apply-patches.sh`
+* 5. Set up the build environment:
+  `source build/envsetup.sh`
+* 6. Select the device:
+  `lunch lineage_gtel3g-userdebug`
+* 7. Build LineageOS:
+  `mka bacon`
