@@ -1,6 +1,6 @@
 
 # Graphics rendering
-lib/libboost.so
+lib/libboost.so|cb2998bffba982c3d27d3b0d764c262851242abf
 lib/egl/libGLES_mali.so
 
 # WiFi
@@ -35,7 +35,7 @@ lib/libsprd_agps_agent.so
 lib/hw/gps.default.so
 lib/libfactoryutil.so
 lib/libatparser.so
-vendor/firmware/vbc_eq
+vendor/firmware/vbc_eq|b57c498ab33a64fef1cbadc5198092fdcda068f4
 bin/macloader
 bin/nvitemd
 bin/refnotify
@@ -48,8 +48,8 @@ lib/libsecnativefeature.so
 lib/libomission_avoidance.so
 lib/libomx_aacdec_sprd.so
 lib/libomx_mp3dec_sprd.so
-lib/libomx_avcdec_hw_sprd.so
-lib/libomx_avcenc_hw_sprd.so
-lib/libomx_vpxdec_hw_sprd.so
-lib/libomx_m4vh263dec_hw_sprd.so
-lib/libomx_m4vh263enc_hw_sprd.so
+lib/libomx_avcdec_hw_sprd.so|b111be1cb906eadb6e6ff24af0ec1e5d6a348aed
+lib/libomx_avcenc_hw_sprd.so|f42ecf44c0479444d9ae48f57be5ceec0072ce07
+lib/libomx_vpxdec_hw_sprd.so|076a79bd0babd2609eb4e12d7c9934ce160eec8e
+lib/libomx_m4vh263dec_hw_sprd.so|b1efd4676f1a9199869891ea3a6305bf127d693a
+lib/libomx_m4vh263enc_hw_sprd.so|8c95262297046e7f29fdaf237e14931c36dc642e
