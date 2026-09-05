@@ -97,14 +97,13 @@ PRODUCT_BRAND := samsung
 PRODUCT_MANUFACTURER := samsung
 PRODUCT_MODEL := SM-T561
 
-# Offline charging percentage
-PRODUCT_PACKAGES += \
-    font_log.png \
-    sprd_charger_animation
-
 # Excluded hardware features
 PRODUCT_COPY_FILES += device/samsung/gtel3g/configs/permissions/gtel3g_excluded_hardware.xml:$(TARGET_COPY_OUT_SYSTEM)/etc/permissions/gtel3g_excluded_hardware.xml
 
 # Root filesystem
 PRODUCT_PACKAGES += \
     fstab.sc8830
+
+# SPRD offline charger
+PRODUCT_PACKAGES += \
+    sprd_charger
