@@ -101,33 +101,3 @@ index 7369ac7..2835e46 100644
          *outBufferHandle = bufferHandle;
  
          return Error::NONE;
-diff --git a/graphics/mapper/2.0/utils/passthrough/include/mapper-passthrough/2.0/GrallocLoader.h b/graphics/mapper/2.0/utils/passthrough/include/mapper-passthrough/2.0/GrallocLoader.h
-index e8b1b4b..c7abb4d 100644
---- a/graphics/mapper/2.0/utils/passthrough/include/mapper-passthrough/2.0/GrallocLoader.h
-+++ b/graphics/mapper/2.0/utils/passthrough/include/mapper-passthrough/2.0/GrallocLoader.h
-@@ -57,22 +57,15 @@ class GrallocImportedBufferPool {
-     }
- 
-     void* add(native_handle_t* bufferHandle) {
--        std::lock_guard<std::mutex> lock(mMutex);
--        return mBufferHandles.insert(bufferHandle).second ? bufferHandle : nullptr;
-+        return static_cast<void*>(bufferHandle);
-     }
- 
-     native_handle_t* remove(void* buffer) {
--        auto bufferHandle = static_cast<native_handle_t*>(buffer);
--
--        std::lock_guard<std::mutex> lock(mMutex);
--        return mBufferHandles.erase(bufferHandle) == 1 ? bufferHandle : nullptr;
-+        return static_cast<native_handle_t*>(buffer);
-     }
- 
-     const native_handle_t* get(void* buffer) {
--        auto bufferHandle = static_cast<const native_handle_t*>(buffer);
--
--        std::lock_guard<std::mutex> lock(mMutex);
--        return mBufferHandles.count(bufferHandle) == 1 ? bufferHandle : nullptr;
-+        return static_cast<const native_handle_t*>(buffer);
-     }
- 
-    private:
