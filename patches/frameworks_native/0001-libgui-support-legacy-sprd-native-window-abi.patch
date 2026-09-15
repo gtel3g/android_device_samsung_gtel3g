@@ -1,14 +1,12 @@
 diff --git a/libs/ui/Gralloc2.cpp b/libs/ui/Gralloc2.cpp
-index 918251f..c0e24f2 100644
+index 918251f9d..c25ed7bb2 100644
 --- a/libs/ui/Gralloc2.cpp
 +++ b/libs/ui/Gralloc2.cpp
-@@ -56,17 +56,17 @@ uint64_t getValid10UsageBits() {
+@@ -56,18 +56,6 @@ uint64_t getValid10UsageBits() {
      return valid10UsageBits;
  }
  
-+#if 0
-+// Disabled for legacy SPRD Mapper 2.0 experiment.
- uint64_t getValid11UsageBits() {
+-uint64_t getValid11UsageBits() {
 -    static const uint64_t valid11UsageBits = []() -> uint64_t {
 -        using hardware::graphics::common::V1_1::BufferUsage;
 -        uint64_t bits = 0;
@@ -18,32 +16,19 @@ index 918251f..c0e24f2 100644
 -        return bits;
 -    }();
 -    return valid11UsageBits;
-+    using hardware::graphics::common::V1_1::BufferUsage;
-+    uint64_t bits = 0;
-+    for (const auto bit : hardware::hidl_enum_iterator<BufferUsage>()) {
-+        bits = bits | bit;
-+    }
-+    return bits;
- }
-+#endif
- 
+-}
+-
  }  // anonymous namespace
  
-@@ -84,15 +84,24 @@ Mapper::Mapper()
+ void Mapper::preload() {
+@@ -84,16 +72,13 @@ Mapper::Mapper()
          LOG_ALWAYS_FATAL("gralloc-mapper must be in passthrough mode");
      }
  
 -    // IMapper 2.1 is optional
 -    mMapperV2_1 = IMapper::castFrom(mMapper);
-+    /*
-+     * Legacy SPRD gralloc0 device.
-+     *
-+     * This device only provides mapper@2.0 passthrough. Keep the
-+     * optional mapper@2.1 pointer unused. On this legacy stack it
-+     * becomes corrupted later during boot, so never dereference it.
-+     */
++    // Legacy SPRD gralloc0 only provides mapper@2.0 passthrough.
 +    mMapperV2_1 = nullptr;
-+
  }
  
  Gralloc2::Error Mapper::validateBufferDescriptorInfo(
@@ -51,14 +36,11 @@ index 918251f..c0e24f2 100644
      uint64_t validUsageBits = getValid10UsageBits();
 -    if (mMapperV2_1 != nullptr) {
 -        validUsageBits = validUsageBits | getValid11UsageBits();
-+
-+    if (mMapperV2_1.get() != nullptr) {
-+        ALOGE("Legacy SPRD: mapper2.1 guard corrupted: this=%p mapper=%p guard=%p",
-+              this, mMapper.get(), mMapperV2_1.get());
-     }
+-    }
  
      if (descriptorInfo.usage & ~validUsageBits) {
-@@ -122,20 +131,23 @@ Error Mapper::createDescriptor(
+         ALOGE("buffer descriptor contains invalid usage bits 0x%" PRIx64,
+@@ -122,19 +107,16 @@ Error Mapper::createDescriptor(
                         *outDescriptor = tmpDescriptor;
                     };
  
@@ -74,12 +56,7 @@ index 918251f..c0e24f2 100644
 -            descriptorInfo.usage,
 -        };
 -        ret = mMapper->createDescriptor(info, hidl_cb);
-+    if (mMapperV2_1.get() != nullptr) {
-+        ALOGE("Legacy SPRD: mapper2.1 guard corrupted in createDescriptor: "
-+              "this=%p mapper=%p guard=%p",
-+              this, mMapper.get(), mMapperV2_1.get());
-     }
- 
+-    }
 +    const hardware::graphics::mapper::V2_0::IMapper::BufferDescriptorInfo info = {
 +        descriptorInfo.width,
 +        descriptorInfo.height,
@@ -90,25 +67,19 @@ index 918251f..c0e24f2 100644
 +
 +    hardware::Return<void> ret =
 +            mMapper->createDescriptor(info, hidl_cb);
-+
+ 
      return (ret.isOk()) ? error : kTransactionError;
  }
- 
-@@ -171,14 +183,18 @@ Error Mapper::validateBufferSize(buffer_handle_t bufferHandle,
+@@ -171,14 +153,12 @@ Error Mapper::validateBufferSize(buffer_handle_t bufferHandle,
          const IMapper::BufferDescriptorInfo& descriptorInfo,
          uint32_t stride) const
  {
 -    if (mMapperV2_1 == nullptr) {
 -        return Error::NONE;
+-    }
 +    (void)bufferHandle;
 +    (void)descriptorInfo;
 +    (void)stride;
-+
-+    if (mMapperV2_1.get() != nullptr) {
-+        ALOGE("Legacy SPRD: mapper2.1 guard corrupted in validateBufferSize: "
-+              "this=%p mapper=%p guard=%p",
-+              this, mMapper.get(), mMapperV2_1.get());
-     }
  
 -    auto buffer = const_cast<native_handle_t*>(bufferHandle);
 -    auto ret = mMapperV2_1->validateBufferSize(buffer, descriptorInfo, stride);
@@ -119,17 +90,13 @@ index 918251f..c0e24f2 100644
  }
  
  void Mapper::getTransportSize(buffer_handle_t bufferHandle,
-@@ -187,28 +203,11 @@ void Mapper::getTransportSize(buffer_handle_t bufferHandle,
+@@ -187,28 +167,6 @@ void Mapper::getTransportSize(buffer_handle_t bufferHandle,
      *outNumFds = uint32_t(bufferHandle->numFds);
      *outNumInts = uint32_t(bufferHandle->numInts);
  
 -    if (mMapperV2_1 == nullptr) {
 -        return;
-+    if (mMapperV2_1.get() != nullptr) {
-+        ALOGE("Legacy SPRD: mapper2.1 guard corrupted in getTransportSize: "
-+              "this=%p mapper=%p guard=%p",
-+              this, mMapper.get(), mMapperV2_1.get());
-     }
+-    }
 -
 -    Error error;
 -    auto buffer = const_cast<native_handle_t*>(bufferHandle);
@@ -153,7 +120,7 @@ index 918251f..c0e24f2 100644
  
  Error Mapper::lock(buffer_handle_t bufferHandle, uint64_t usage,
 diff --git a/libs/ui/GraphicBufferAllocator.cpp b/libs/ui/GraphicBufferAllocator.cpp
-index eaba1ed..630b12f 100644
+index eaba1ed1a..15b07107c 100644
 --- a/libs/ui/GraphicBufferAllocator.cpp
 +++ b/libs/ui/GraphicBufferAllocator.cpp
 @@ -115,7 +115,16 @@ status_t GraphicBufferAllocator::allocate(uint32_t width, uint32_t height,
