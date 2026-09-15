@@ -119,25 +119,3 @@ index 918251f9d..c25ed7bb2 100644
  }
  
  Error Mapper::lock(buffer_handle_t bufferHandle, uint64_t usage,
-diff --git a/libs/ui/GraphicBufferAllocator.cpp b/libs/ui/GraphicBufferAllocator.cpp
-index eaba1ed1a..15b07107c 100644
---- a/libs/ui/GraphicBufferAllocator.cpp
-+++ b/libs/ui/GraphicBufferAllocator.cpp
-@@ -115,7 +115,16 @@ status_t GraphicBufferAllocator::allocate(uint32_t width, uint32_t height,
-     info.format = static_cast<Gralloc2::PixelFormat>(format);
-     info.usage = usage;
- 
--    Gralloc2::Error error = mAllocator->allocate(info, stride, handle);
-+    /*
-+     * Keep this allocator outside GraphicBufferAllocator: the member-backed
-+     * instance is corrupted by the legacy SPRD native-window ABI. Reuse one
-+     * known-good instance instead of querying IAllocator for every buffer.
-+     */
-+    static const Gralloc2::Allocator sprdAllocator(
-+            GraphicBufferMapper::getInstance().getGrallocMapper());
-+
-+    Gralloc2::Error error =
-+            sprdAllocator.allocate(info, stride, handle);
-     if (error == Gralloc2::Error::NONE) {
-         Mutex::Autolock _l(sLock);
-         KeyedVector<buffer_handle_t, alloc_rec_t>& list(sAllocList);
